@@ -65,3 +65,5 @@
 | 2026-11-17 | El test de ingesta reemplaza la descarga por una falsa con `monkeypatch` | No depende de internet y permite contar cuántas veces se intentó descargar |
 | 2026-11-17 | La reconciliación se separó en la función `reconciliacion_cierra` | Se puede probar sola con números inventados, incluido el caso en que no cierra, que con datos reales nunca pasa |
 | 2026-11-17 | El test de calidad cubre una regla de rechazo, una de advertencia y los duplicados | La consigna pide al menos una regla; así el mismo test prueba los tres caminos posibles de una fila |
+| 2026-11-17 | Tiempo y RAM medidos con `/usr/bin/time -l make all` después de `make limpiar-datos` | Es lo que vive quien clona el repo: incluye descargas y todas las etapas. Resultado: 20,3 s y 1,29 GB de pico en la Mac M2 de 8 GB |
+| 2026-11-17 | `make limpiar-datos` reintenta el borrado una vez | En macOS el Finder puede crear un `.DS_Store` en medio del borrado y hacer fallar `rm -rf` |

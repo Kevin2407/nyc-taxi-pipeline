@@ -58,5 +58,6 @@ modelo: transformacion
 test: $(INSTALADO)
 	$(PYTHON) -m pytest -q
 
+# Si el Finder de macOS crea un .DS_Store mientras se borra, rm falla; se reintenta una vez.
 limpiar-datos:
-	rm -rf data
+	rm -rf data || (sleep 1 && rm -rf data)
