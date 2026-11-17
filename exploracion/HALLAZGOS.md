@@ -88,10 +88,94 @@ de taxis, sino más viajes de un tipo que en 2024 se registraba menos.
 Estos números son sobre datos crudos. Los definitivos de `RESULTADOS.md` salen del modelo,
 después de aplicar las reglas de calidad.
 
-## 5. Pendiente de decidir
+## 5. Umbrales y reglas propias (`explorar_umbrales.py`)
 
-- Severidad de cada regla. Criterio que venimos usando: rechazo cuando la fila es imposible
-  o rompe un cálculo; advertencia cuando el dato es dudoso pero el viaje sigue sirviendo.
-- Máximo de distancia y su justificación (todavía no medimos la distribución).
-- Regla propia. Candidatas salidas de esta exploración: marcar los viajes de tipo de pago 0,
-  tratar aparte los tipos 3 y 4, o marcar las zonas 264 y 265.
+**Distancia (millas)**
+
+| | Marzo 2024 | Marzo 2025 |
+| --- | --- | --- |
+| Percentil 99 | 19,9 | 19,4 |
+| Percentil 99,9 | 29,3 | 28,8 |
+| Percentil 99,99 | 56,2 | 58,0 |
+| Máximo | 176.836 | 320.136 |
+| Más de 50 | 508 | 595 |
+| Más de 100 | 122 | 214 |
+| Más de 1.000 | 94 | 165 |
+
+"Percentil 99,99 = 58" quiere decir que el 99,99 % de los viajes mide menos de 58 millas.
+Por encima de 100 millas quedan muy pocas filas y casi todas son valores absurdos.
+
+**Viajes con distancia 0**
+
+| | Marzo 2024 | Marzo 2025 |
+| --- | --- | --- |
+| Con distancia <= 0 | 87.168 | 103.722 |
+| De esos, con cobro positivo | 83.065 (95 %) | 98.447 (95 %) |
+| Total mediano | 20,22 | 19,77 |
+
+Son viajes que se cobraron normalmente. Falta la distancia, no el viaje.
+
+**Tarifa base (`fare_amount`) menor o igual a 0**
+
+| Tipo de pago | 2024: total negativo | 2024: total >= 0 | 2025: total negativo | 2025: total >= 0 |
+| --- | --- | --- | --- | --- |
+| 0 | 7 | 14.639 | 14 | 140.469 |
+| 1 | 35 | 148 | 25 | 81 |
+| 2 | 10.476 | 287 | 17.032 | 619 |
+| 3 | 7.074 | 138 | 8.719 | 215 |
+| 4 | 26.719 | 233 | 42.896 | 308 |
+
+En los tipos 1 a 4, la tarifa no positiva casi siempre viene con total negativo (ya cubierto
+por la regla de total negativo). En el tipo 0 es otra cosa: tarifa negativa con total positivo,
+y se multiplicó por 10 entre años. En total son 59.756 filas en 2024 (1,67 %) y 210.378 en
+2025 (5,08 %).
+
+**Velocidad promedio (mph)**, sobre viajes con duración y distancia positivas
+
+| | Marzo 2024 | Marzo 2025 |
+| --- | --- | --- |
+| Mediana | 9,6 | 9,8 |
+| Percentil 99 | 34,7 | 34,3 |
+| Percentil 99,9 | 48,4 | 46,1 |
+| Más de 65 | 1.340 | 1.173 |
+| Más de 80 | 1.241 | 1.050 |
+| Más de 100 | 1.178 | 961 |
+
+Casi todo lo que supera 65 mph supera también 100: no son taxis rápidos, son datos mal cargados.
+
+**Bajada anterior o igual a la subida.** En 2025, 18.744 de las 22.280 filas son pagos con
+tarjeta con exactamente la misma hora de subida y de bajada. Eso explica el salto respecto
+de 2024 (1.128 filas).
+
+**Zonas 264 y 265.** Aparecen como origen o destino en 35.374 viajes de 2024 (0,99 %) y
+28.415 de 2025 (0,69 %).
+
+## 6. Reglas decididas
+
+Están definidas, con su justificación, en `contracts/reglas_calidad.yaml`.
+
+| Id | Regla | Severidad | 2024-03 | 2025-03 |
+| --- | --- | --- | --- | --- |
+| R01 | Subida fuera del mes | rechazo | 23 | 33 |
+| R02 | Bajada <= subida | rechazo | 1.128 | 22.280 |
+| R03 | Distancia <= 0 | advertencia | 87.168 | 103.722 |
+| R04 | Distancia > 100 millas | rechazo | 122 | 214 |
+| R05 | Total negativo | rechazo | 44.311 | 68.686 |
+| R06 | Pasajeros nulo o 0 | advertencia | 466.562 | 939.378 |
+| R07 | Zona inexistente | rechazo | 0 | 0 |
+| R08 | Duplicado exacto | rechazo | 0 | 0 |
+| R09 | Tarifa <= 0 (propia) | advertencia | 59.756 | 210.378 |
+| R10 | Velocidad > 80 mph (propia) | rechazo | 1.241 | 1.050 |
+| R11 | Zona 264 o 265 (propia) | advertencia | 35.374 | 28.415 |
+
+Resultado esperado al aplicarlas (una fila puede violar varias reglas):
+
+| | Marzo 2024 | Marzo 2025 |
+| --- | --- | --- |
+| Leídas | 3.582.628 | 4.145.257 |
+| A cuarentena | 46.704 (1,30 %) | 92.057 (2,22 %) |
+| Aceptadas | 3.535.924 | 4.053.200 |
+| Aceptadas con algún flag | 529.328 | 997.980 |
+
+Estos números son la referencia para comprobar `src/calidad.py`: el reporte de calidad del
+pipeline tiene que dar lo mismo.

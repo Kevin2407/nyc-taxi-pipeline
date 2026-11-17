@@ -1,0 +1,159 @@
+# Reglas de calidad del pipeline. Las aplica src/calidad.py sobre la tabla yellow_trips.
+#
+# severidad:
+#   rechazo      la fila va a la tabla de cuarentena y no sigue en el pipeline
+#   advertencia  la fila sigue, con el id de la regla anotado en la columna flags
+#
+# condicion: expresión SQL que es verdadera cuando la fila VIOLA la regla.
+#   Usa los nombres del contrato (snake_case) y puede usar la columna mes_archivo
+#   y la tabla zonas (location_id, borough, zone, service_zone).
+#
+# Criterio general: rechazo cuando la fila describe algo imposible o no se puede
+# asignar a un mes o a una zona; advertencia cuando un dato es dudoso o falta pero
+# el viaje existió y se cobró. Las mediciones están en exploracion/HALLAZGOS.md.
+
+version: 1
+reglas:
+  - id: R01
+    nombre: subida_fuera_del_mes
+    origen: obligatoria
+    descripcion: La fecha de subida no pertenece al mes del archivo
+    severidad: rechazo
+    condicion: "strftime(tpep_pickup_datetime, '%Y-%m') <> mes_archivo"
+    umbral: Mes calendario del archivo, sin tolerancia
+    justificacion: >
+      El pipeline procesa y particiona por mes; una fila de otro mes quedaría en la
+      partición equivocada. Son 23 filas en 2024-03 y 33 en 2025-03, así que
+      rechazarlas no cambia ningún resultado.
+
+  - id: R02
+    nombre: bajada_no_posterior
+    origen: obligatoria
+    descripcion: La bajada es anterior o igual a la subida
+    severidad: rechazo
+    condicion: "tpep_dropoff_datetime <= tpep_pickup_datetime"
+    umbral: Duración mayor a 0 segundos
+    justificacion: >
+      Un viaje no puede durar cero ni tiempo negativo, y sin duración no se puede
+      calcular la velocidad. Afecta al 0,03 % de 2024-03 y al 0,54 % de 2025-03.
+      En 2025 casi todas (18.744 de 22.280) son pagos con tarjeta con la misma hora
+      exacta de subida y bajada: registros sin recorrido real.
+
+  - id: R03
+    nombre: distancia_no_positiva
+    origen: obligatoria
+    descripcion: La distancia es menor o igual a 0
+    severidad: advertencia
+    condicion: "trip_distance <= 0"
+    umbral: Distancia mayor a 0 millas
+    justificacion: >
+      Medimos que el 95 % de estos viajes tiene un cobro positivo, con un total
+      mediano de unos 20 dólares: son viajes reales en los que no se registró la
+      distancia, no viajes inexistentes. Rechazarlos sacaría el 2,5 % de las filas
+      y de los ingresos. Quedan marcados y su velocidad se deja nula.
+
+  - id: R04
+    nombre: distancia_excesiva
+    origen: obligatoria
+    descripcion: La distancia supera el máximo aceptado
+    severidad: rechazo
+    condicion: "trip_distance > 100"
+    umbral: 100 millas
+    justificacion: >
+      El 99,99 % de los viajes mide menos de 58 millas, así que 100 deja margen para
+      viajes largos fuera de la ciudad. Lo superan 122 filas en 2024-03 y 214 en
+      2025-03, y la mayoría (94 y 165) pasa las 1.000 millas; el máximo es de
+      320.136 millas, más de doce vueltas a la Tierra. Son errores de carga.
+
+  - id: R05
+    nombre: total_negativo
+    origen: obligatoria
+    descripcion: El importe total es negativo
+    severidad: rechazo
+    condicion: "total_amount < 0"
+    umbral: Importe total mayor o igual a 0
+    justificacion: >
+      Se concentran en los tipos de pago disputa (46 % de sus filas) y sin cargo
+      (cerca del 30 %); con tarjeta casi no existen. Son ajustes contables, no
+      viajes con un precio, y dejarlos falsearía los promedios de ingreso.
+
+  - id: R06
+    nombre: pasajeros_nulo_o_cero
+    origen: obligatoria
+    descripcion: La cantidad de pasajeros es nula o igual a 0
+    severidad: advertencia
+    condicion: "passenger_count IS NULL OR passenger_count = 0"
+    umbral: Al menos 1 pasajero informado
+    justificacion: >
+      Afecta al 13 % de 2024-03 y al 22,7 % de 2025-03. Todos los nulos son del tipo
+      de pago 0, una categoría entera que llega sin ese dato. Rechazar eliminaría
+      casi un cuarto de 2025 y distorsionaría la comparación entre años. El dato no
+      interviene en ninguna columna derivada ni en ninguna pregunta.
+
+  - id: R07
+    nombre: zona_inexistente
+    origen: obligatoria
+    descripcion: La zona de origen o de destino no existe en la tabla de zonas
+    severidad: rechazo
+    condicion: >-
+      pu_location_id NOT IN (SELECT location_id FROM zonas)
+      OR do_location_id NOT IN (SELECT location_id FROM zonas)
+    umbral: El identificador tiene que existir en taxi_zone_lookup.csv
+    justificacion: >
+      Sin zona válida no se puede enriquecer el viaje con barrio y nombre, y el
+      modelo quedaría con filas huérfanas. Hoy no hay ningún caso en los dos meses;
+      la regla protege contra archivos futuros y se prueba con datos sintéticos.
+
+  - id: R08
+    nombre: duplicado_exacto
+    origen: obligatoria
+    tipo: duplicado
+    descripcion: La fila es una copia exacta de otra del mismo archivo
+    severidad: rechazo
+    umbral: Todas las columnas iguales; se conserva una copia y se rechazan las demás
+    justificacion: >
+      Una copia exacta cuenta dos veces el mismo viaje y el mismo ingreso. No tiene
+      condición por fila porque hay que comparar filas entre sí; src/calidad.py la
+      trata aparte. Hoy no hay ningún caso; se prueba con datos sintéticos.
+
+  - id: R09
+    nombre: tarifa_no_positiva
+    origen: propia
+    descripcion: La tarifa base (fare_amount) es menor o igual a 0
+    severidad: advertencia
+    condicion: "fare_amount <= 0"
+    umbral: Tarifa mayor a 0 dólares
+    justificacion: >
+      Regla descubierta en la exploración. En 2025-03 hay 140.469 viajes del tipo de
+      pago 0 con tarifa negativa y total positivo (14.639 en 2024-03): el viaje se
+      cobró, pero la tarifa base no sirve. Rechazarlos sacaría el 5 % de 2025 contra
+      el 1,7 % de 2024 y sesgaría la comparación. Quedan marcados; la propina como
+      porcentaje de la tarifa se deja nula y la tarifa media se calcula sin ellos.
+
+  - id: R10
+    nombre: velocidad_imposible
+    origen: propia
+    descripcion: La velocidad promedio del viaje supera el máximo creíble
+    severidad: rechazo
+    condicion: >-
+      tpep_dropoff_datetime > tpep_pickup_datetime
+      AND trip_distance / (date_diff('second', tpep_pickup_datetime, tpep_dropoff_datetime) / 3600.0) > 80
+    umbral: 80 millas por hora de promedio
+    justificacion: >
+      Regla descubierta en la exploración. El 99,9 % de los viajes promedia menos
+      de 49 mph y el límite máximo en autopistas del estado de Nueva York es 65 mph;
+      un promedio de más de 80 indica que la distancia o los horarios están mal.
+      Son 1.241 filas en 2024-03 y 1.050 en 2025-03 (0,03 %).
+
+  - id: R11
+    nombre: zona_desconocida
+    origen: propia
+    descripcion: La zona de origen o de destino es 264 (Unknown) o 265 (Outside of NYC)
+    severidad: advertencia
+    condicion: "pu_location_id IN (264, 265) OR do_location_id IN (264, 265)"
+    umbral: Zonas 1 a 263
+    justificacion: >
+      Regla descubierta en la exploración. Estas dos zonas existen en la tabla, así
+      que pasan R07, pero no son un lugar real. Son el 1,0 % de 2024-03 y el 0,7 %
+      de 2025-03. El viaje y su cobro son válidos, por eso no se rechaza; el flag
+      permite excluirlas de los rankings por zona.
