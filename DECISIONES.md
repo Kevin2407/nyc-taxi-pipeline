@@ -61,3 +61,7 @@
 | 2026-11-17 | El Makefile crea `.venv` si no existe y reinstala dependencias solo si cambió `requirements.txt` (marca `.venv/.instalado`) | Quien clona corre un solo comando sin preparar nada. Las corridas siguientes no reinstalan |
 | 2026-11-17 | `PYTHON_BASE` configurable (por defecto `python3`) | El Python por defecto de cada máquina es distinto; en la Mac de Kevin `python3` es 3.14 y usamos 3.11 |
 | 2026-11-17 | El Makefile lo escribió Claude directamente en el repo | Las líneas de comandos de Make tienen que empezar con tabulador, y al copiar desde un chat suelen quedar espacios |
+| 2026-11-17 | Tests con datos sintéticos (4 o 5 viajes inventados) en una base temporal | Se sabe de antemano qué tiene que pasar con cada fila, corren en menos de un segundo y no tocan `data/` |
+| 2026-11-17 | El test de ingesta reemplaza la descarga por una falsa con `monkeypatch` | No depende de internet y permite contar cuántas veces se intentó descargar |
+| 2026-11-17 | La reconciliación se separó en la función `reconciliacion_cierra` | Se puede probar sola con números inventados, incluido el caso en que no cierra, que con datos reales nunca pasa |
+| 2026-11-17 | El test de calidad cubre una regla de rechazo, una de advertencia y los duplicados | La consigna pide al menos una regla; así el mismo test prueba los tres caminos posibles de una fila |

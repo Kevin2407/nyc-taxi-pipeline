@@ -124,6 +124,19 @@ Modelo estrella en `data/taxi.duckdb`, construido por `src/modelo.py` con los SQ
 
 `agg_zone_hour` tiene viajes, ingreso total (`sum(total_amount)`) y duración media en minutos. Las preguntas de negocio están en `sql/preguntas/`, una por archivo, y sus resultados en `RESULTADOS.md`.
 
+### Tests
+
+`make test` corre 4 tests con pytest, sobre datos sintéticos y bases temporales: no usan internet ni tocan `data/`.
+
+| Test | Qué verifica |
+| --- | --- |
+| `test_calidad.py::test_reglas_de_rechazo_y_advertencia` | Con 4 viajes inventados: total negativo (R05) y duplicado (R08) van a cuarentena; pasajeros en 0 (R06) queda en válidos con el flag `R06`; de un duplicado se conserva una copia |
+| `test_ingesta.py::test_ingesta_es_idempotente` | Con una descarga simulada: la primera corrida descarga y registra; la segunda no descarga ni agrega filas al log; si el archivo se corrompe, vuelve a descargar |
+| `test_reconciliacion.py::test_reconciliacion_detecta_filas_perdidas` | La comparación leídas = aceptadas + cuarentena da falso si falta o sobra una fila |
+| `test_reconciliacion.py::test_reconciliacion_cierra_en_una_corrida` | Con 5 viajes, 2 rotos, el reporte de calidad da 5 leídas, 3 aceptadas y 2 en cuarentena |
+
+Comprobamos que los tests detectan errores: al cambiar R05 a advertencia en `contracts/reglas_calidad.yaml`, `test_reglas_de_rechazo_y_advertencia` falla.
+
 ## Limitaciones conocidas
 
 - La ingesta reintenta ante cualquier error de descarga, también los que no se arreglan reintentando. Un mes que todavía no está publicado devuelve `403 Forbidden` (probado con `2031-01`) y el script espera 14 segundos en total antes de registrar el error.
@@ -139,4 +152,4 @@ Modelo estrella en `data/taxi.duckdb`, construido por `src/modelo.py` con los SQ
 | Herramienta | Para qué se usó |
 | --- | --- |
 | GitHub Copilot | Generar la estructura inicial de carpetas y archivos vacíos (PR #1) |
-| Claude | Guía paso a paso y explicación de conceptos y herramientas. Propuesta del código Python de `src/`, que escribimos, ejecutamos y probamos nosotros. Redacción de `exploracion/HALLAZGOS.md`, `DECISIONES.md`, `RESULTADOS.md` y las secciones de decisiones de este README a partir de nuestras corridas. Escribió los scripts `exploracion/explorar_umbrales.py` y `exploracion/explorar_resultados.py`, los SQL de `sql/modelo/` y `sql/preguntas/`, y el `Makefile` |
+| Claude | Guía paso a paso y explicación de conceptos y herramientas. Propuesta del código Python de `src/`, que escribimos, ejecutamos y probamos nosotros. Redacción de `exploracion/HALLAZGOS.md`, `DECISIONES.md`, `RESULTADOS.md` y las secciones de decisiones de este README a partir de nuestras corridas. Escribió los scripts `exploracion/explorar_umbrales.py` y `exploracion/explorar_resultados.py`, los SQL de `sql/modelo/` y `sql/preguntas/`, el `Makefile` y el diseño de los tests de `tests/` |
