@@ -15,3 +15,12 @@
 | 2026-11-16 | Descarga en bloques de 1 MB a un archivo `.tmp` que se renombra al terminar | Nunca hay más de 1 MB en memoria, y un corte a mitad de descarga no deja un archivo incompleto con el nombre definitivo |
 | 2026-11-16 | 3 reintentos con esperas de 2, 4 y 8 segundos; si falla, fila `error` en el log y código de salida 1 | Lo pide la consigna. La espera creciente evita insistir sobre un servidor saturado, y el código distinto de 0 hace que `make` corte el pipeline |
 | 2026-11-16 | La tabla de zonas usa la misma función `ingestar` que los meses | "Una sola vez" es un caso de la misma idempotencia; no hace falta código aparte |
+| 2026-11-16 | El contrato (`contracts/yellow_schema.yaml`) describe el destino: nombres en snake_case y los mismos tipos que traen los archivos | No inventamos conversiones de tipo que haya que defender. El contrato tiene número de versión y su historial queda en Git |
+| 2026-11-16 | snake_case con una función general (`a_snake_case`) y no con una tabla fija de equivalencias | Normaliza también una columna que aparezca mañana. Verificado con `VendorID`, `RatecodeID`, `PULocationID`, `DOLocationID` y `Airport_fee` |
+| 2026-11-16 | `cbd_congestion_fee` está marcada `opcional: true` en el contrato | Distingue "falta una columna prevista" (2024, se sigue) de "el archivo está roto" (falta una obligatoria, se frena) |
+| 2026-11-16 | `cbd_congestion_fee` vale nulo en 2024, no 0 | El cargo no existía: 0 significaría "se cobró cero". Además los promedios ignoran los nulos y un 0 los bajaría |
+| 2026-11-16 | Columna nueva que no está en el contrato: se reporta, no se carga y el pipeline sigue | Lo conocido sigue siendo válido. Incorporarla es una decisión humana: editar el contrato y subir la versión |
+| 2026-11-16 | Columna obligatoria faltante o tipo distinto al contrato: el pipeline frena con código de salida 1 | Convertir tipos en silencio puede perder datos. Probado cambiando `trip_distance` a INTEGER en el contrato |
+| 2026-11-16 | Los dos meses se unen en la tabla `yellow_trips` de `data/taxi.duckdb`, con `archivo_origen` y `mes_archivo` | La cuarentena pide el archivo de origen y la regla de "subida fuera del mes" necesita saber el mes del archivo |
+| 2026-11-16 | Cargar un mes borra antes sus filas (`DELETE ... WHERE mes_archivo`) | Idempotencia: cargamos 2025-03 dos veces y quedó en 4.145.257 filas; 2024-03 no se tocó |
+| 2026-11-16 | El SQL de carga se genera recorriendo el contrato | Las columnas están escritas en un solo lugar; si cambia el contrato no hay que tocar código |

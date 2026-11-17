@@ -1,2 +1,64 @@
 version: 1
-columns: []
+tabla: yellow_trips
+columns:
+  - name: vendor_id
+    type: INTEGER
+    descripcion: Proveedor del taxímetro que registró el viaje
+  - name: tpep_pickup_datetime
+    type: TIMESTAMP
+    descripcion: Fecha y hora de subida
+  - name: tpep_dropoff_datetime
+    type: TIMESTAMP
+    descripcion: Fecha y hora de bajada
+  - name: passenger_count
+    type: BIGINT
+    descripcion: Cantidad de pasajeros, cargada por el chofer
+  - name: trip_distance
+    type: DOUBLE
+    descripcion: Distancia del viaje en millas
+  - name: ratecode_id
+    type: BIGINT
+    descripcion: Código de la tarifa aplicada
+  - name: store_and_fwd_flag
+    type: VARCHAR
+    descripcion: Si el viaje se guardó en el vehículo antes de enviarse (Y/N)
+  - name: pu_location_id
+    type: INTEGER
+    descripcion: Zona de subida
+  - name: do_location_id
+    type: INTEGER
+    descripcion: Zona de bajada
+  - name: payment_type
+    type: BIGINT
+    descripcion: Forma de pago (0 flexible, 1 tarjeta, 2 efectivo, 3 sin cargo, 4 disputa)
+  - name: fare_amount
+    type: DOUBLE
+    descripcion: Tarifa del viaje, sin recargos ni propina
+  - name: extra
+    type: DOUBLE
+    descripcion: Recargos varios
+  - name: mta_tax
+    type: DOUBLE
+    descripcion: Impuesto MTA
+  - name: tip_amount
+    type: DOUBLE
+    descripcion: Propina (solo se registra la pagada con tarjeta)
+  - name: tolls_amount
+    type: DOUBLE
+    descripcion: Peajes
+  - name: improvement_surcharge
+    type: DOUBLE
+    descripcion: Recargo de mejora
+  - name: total_amount
+    type: DOUBLE
+    descripcion: Importe total cobrado
+  - name: congestion_surcharge
+    type: DOUBLE
+    descripcion: Recargo de congestión del estado de Nueva York
+  - name: airport_fee
+    type: DOUBLE
+    descripcion: Cargo por subir en los aeropuertos
+  - name: cbd_congestion_fee
+    type: DOUBLE
+    opcional: true
+    descripcion: Cargo de la zona de congestión de Manhattan; existe desde 2025
