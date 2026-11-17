@@ -29,6 +29,17 @@ Otros comandos:
 
 Correr `make all` dos veces deja los mismos conteos: la ingesta no vuelve a descargar y cada etapa reemplaza solo los datos de su mes.
 
+**Reproducibilidad verificada.** El 17/11/2026 se clonó el repositorio de cero en una segunda máquina (Ubuntu) y se corrieron `make all MES=2025-03` y `make test` sin ningún paso previo. Los resultados fueron idénticos a los de la Mac:
+
+| Control | macOS (M2, 8 GB) | Ubuntu |
+| --- | --- | --- |
+| Hash de `yellow_tripdata_2025-03.parquet` | `20c4b77cce45...` | `20c4b77cce45...` |
+| Hash de `yellow_tripdata_2024-03.parquet` | `2d4cdc8fb967...` | `2d4cdc8fb967...` |
+| Cuarentena 2025-03 / 2024-03 | 92.057 / 46.704 | 92.057 / 46.704 |
+| Filas en `fact_trips` | 7.589.124 | 7.589.124 |
+| Respuestas a las 6 preguntas | iguales | iguales |
+| Tests | 4 pasan | 4 pasan |
+
 ## Arquitectura
 
 ## Decisiones
