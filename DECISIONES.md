@@ -46,3 +46,13 @@
 | 2026-11-17 | `dia_semana` con `isodow`: 1 es lunes y 7 es domingo | Es el estándar ISO 8601; evita la ambigüedad de si la semana empieza en domingo o en lunes |
 | 2026-11-17 | Zonas con `LEFT JOIN`, dos veces (origen y destino) | Conserva todos los viajes aunque faltara una zona. R07 ya garantiza que existen, así que no queda ninguna nula |
 | 2026-11-17 | Después de escribir, se cuentan las filas del archivo y se comparan con `trips_validos`; si no coinciden, código 1 | Control barato de que el JOIN no perdió ni duplicó filas |
+| 2026-11-17 | Modelo estrella como tablas en `data/taxi.duckdb`, construidas desde la capa curada en Parquet | La capa curada es la fuente; el modelo se reconstruye entero en cada corrida (unos segundos) y así nunca queda desfasado |
+| 2026-11-17 | `fact_trips` guarda claves y medidas, sin nombres de zona ni atributos de fecha | Esa información vive una sola vez en `dim_zone` y `dim_date`; es la separación que define un modelo estrella |
+| 2026-11-17 | `dim_date` incluye `anio_mes` (texto `AAAA-MM`) | Todas las preguntas filtran por mes con esa columna, cruzando con la dimensión |
+| 2026-11-17 | Un archivo SQL por tabla del modelo (`sql/modelo/01..04`) y por pregunta (`sql/preguntas/a..f`), ejecutados en orden por `src/modelo.py` | Lo pide la consigna; además cada consulta se lee sin abrir el Python. La numeración fija el orden: `agg_zone_hour` depende de `fact_trips` |
+| 2026-11-17 | Las preguntas (a) y (b) usan `agg_zone_hour`; las demás, `fact_trips` | La agregada responde por zona y hora con ~211.000 filas en vez de 7,6 millones. El resto necesita columnas que la agregada no tiene |
+| 2026-11-17 | Ingreso promedio por hora = ingreso total / viajes, no promedio de promedios | Promediar promedios de zonas con distinta cantidad de viajes da un número incorrecto |
+| 2026-11-17 | Tarifa media sin viajes con tarifa <= 0 (R09) | Su tarifa base no es válida y bajaría el promedio |
+| 2026-11-17 | Rankings por zona sin las zonas 264 y 265 (R11) | No son un lugar real |
+| 2026-11-17 | Pregunta (c): solo zonas con al menos 1.000 viajes en el mes | Sin mínimo, el ranking lo encabezan zonas con 1 o 2 viajes al 100 %, que no dicen nada |
+| 2026-11-17 | El mes de comparación es el mismo mes del año anterior, calculado a partir de `--mes` | Lo pide la consigna; así el comando recibe un solo parámetro |

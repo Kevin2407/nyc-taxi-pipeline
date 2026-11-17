@@ -75,6 +75,28 @@ Columnas derivadas de la capa curada:
 
 Los conteos se obtienen con `python -m src.transformacion --mes AAAA-MM`, que al final cuenta las filas de cada partición leyendo los archivos.
 
+### Modelo
+
+Modelo estrella en `data/taxi.duckdb`, construido por `src/modelo.py` con los SQL de `sql/modelo/` a partir de la capa curada.
+
+```
+              dim_date
+                 │ fecha
+                 │
+           fact_trips ── pu_zone_id / do_zone_id ── dim_zone
+                 │
+                 └──► agg_zone_hour (agregada)
+```
+
+| Tabla | Granularidad (una fila es...) | Filas (marzo 2024 + marzo 2025) |
+| --- | --- | --- |
+| `fact_trips` | un viaje aceptado por las reglas de calidad | 7.589.124 |
+| `dim_zone` | una zona de taxi de la TLC | 265 |
+| `dim_date` | un día calendario con al menos un viaje | 62 |
+| `agg_zone_hour` | una zona de origen en una fecha y una hora de subida | 211.405 |
+
+`agg_zone_hour` tiene viajes, ingreso total (`sum(total_amount)`) y duración media en minutos. Las preguntas de negocio están en `sql/preguntas/`, una por archivo, y sus resultados en `RESULTADOS.md`.
+
 ## Limitaciones conocidas
 
 - La ingesta reintenta ante cualquier error de descarga, también los que no se arreglan reintentando. Un mes que todavía no está publicado devuelve `403 Forbidden` (probado con `2031-01`) y el script espera 14 segundos en total antes de registrar el error.
@@ -90,4 +112,4 @@ Los conteos se obtienen con `python -m src.transformacion --mes AAAA-MM`, que al
 | Herramienta | Para qué se usó |
 | --- | --- |
 | GitHub Copilot | Generar la estructura inicial de carpetas y archivos vacíos (PR #1) |
-| Claude | Guía paso a paso, explicación de conceptos y herramientas, propuesta de código que escribimos y probamos |
+| Claude | Guía paso a paso y explicación de conceptos y herramientas. Propuesta del código Python de `src/`, que escribimos, ejecutamos y probamos nosotros. Redacción de `exploracion/HALLAZGOS.md`, `DECISIONES.md`, `RESULTADOS.md` y las secciones de decisiones de este README a partir de nuestras corridas. Escribió los scripts `exploracion/explorar_umbrales.py` y `exploracion/explorar_resultados.py`, y los SQL de `sql/modelo/` y `sql/preguntas/` |
