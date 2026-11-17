@@ -140,12 +140,15 @@ def validar_mes(mes):
     leidas, aceptadas, en_cuarentena = reportar(con, mes, reglas)
     con.close()
 
-    if leidas != aceptadas + en_cuarentena:
+    if not reconciliacion_cierra(leidas, aceptadas, en_cuarentena):
         print(f"ERROR de reconciliación: {leidas} leídas != {aceptadas} aceptadas + {en_cuarentena} en cuarentena.")
         return False
 
     print("OK: la reconciliación cierra (leídas = aceptadas + cuarentena).")
     return True
+
+def reconciliacion_cierra(leidas, aceptadas, en_cuarentena):
+    return leidas == aceptadas + en_cuarentena
 
 
 def main():
