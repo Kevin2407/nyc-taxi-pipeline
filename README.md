@@ -147,6 +147,23 @@ Comprobamos que los tests detectan errores: al cambiar R05 a advertencia en `con
 
 ## Tiempo de ejecución y pico de RAM
 
+Medido el 17/11/2026 en una MacBook Air M2 con 8 GB de RAM, desde cero (sin `data/`, así que incluye las descargas):
+
+```bash
+make limpiar-datos
+/usr/bin/time -l make all MES=2025-03
+```
+
+| Medida | Valor |
+| --- | --- |
+| Tiempo total (`real`) | 20,3 segundos |
+| Tiempo de CPU (`user` + `sys`) | 45,6 segundos |
+| Pico de RAM (`maximum resident set size`) | 1.289.863.168 bytes (1,29 GB) |
+
+El tiempo de CPU es mayor que el total porque DuckDB reparte el trabajo entre varios núcleos. El pico de RAM es el del proceso que más memoria usó, y queda en un sexto de los 8 GB disponibles. Las decisiones que lo mantienen bajo: DuckDB lee los Parquet desde el disco sin cargarlos enteros, la descarga y el hash se hacen en bloques de 1 MB, y cada etapa procesa un mes por vez.
+
+El tiempo depende sobre todo de la velocidad de la conexión, porque las descargas suman unos 130 MB.
+
 ## Declaración de uso de IA
 
 | Herramienta | Para qué se usó |
