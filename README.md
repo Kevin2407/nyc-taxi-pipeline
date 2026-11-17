@@ -52,12 +52,36 @@ Criterio de severidad: **rechazo** cuando la fila describe algo imposible o no s
 
 En los dos meses se cumple leídas = aceptadas + cuarentena. Si no se cumpliera, el pipeline termina con código de salida 1.
 
+### Transformación
+
+Columnas derivadas de la capa curada:
+
+| Columna | Cálculo | Cuándo queda nula |
+| --- | --- | --- |
+| `duracion_min` | segundos entre subida y bajada / 60 | nunca (R02 rechaza duraciones <= 0) |
+| `velocidad_mph` | distancia / duración en horas | distancia <= 0 (R03) |
+| `fecha_subida` | fecha de la subida | nunca |
+| `hora_subida` | hora de la subida, 0 a 23 | nunca |
+| `dia_semana` | día ISO: 1 lunes, 7 domingo | nunca |
+| `propina_pct` | propina / tarifa x 100 | tarifa <= 0 (R09) |
+| `pu_borough`, `pu_zone`, `do_borough`, `do_zone` | cruce con la tabla de zonas | nunca (R07 garantiza que la zona existe) |
+
+**Reprocesar un mes reemplaza solo su partición.** Prueba del 17/11/2026: se escribieron los dos meses y después se reprocesó solo marzo 2025.
+
+| Partición | Filas antes | Archivo antes | Filas después | Archivo después |
+| --- | --- | --- | --- | --- |
+| `year=2024/month=03` | 3.535.924 | 136.506.067 bytes, 15:37 | 3.535.924 | 136.506.067 bytes, 15:37 (sin tocar) |
+| `year=2025/month=03` | 4.053.200 | 158.539.385 bytes, 15:37 | 4.053.200 | 158.640.007 bytes, 15:39 (reescrito) |
+
+Los conteos se obtienen con `python -m src.transformacion --mes AAAA-MM`, que al final cuenta las filas de cada partición leyendo los archivos.
+
 ## Limitaciones conocidas
 
 - La ingesta reintenta ante cualquier error de descarga, también los que no se arreglan reintentando. Un mes que todavía no está publicado devuelve `403 Forbidden` (probado con `2031-01`) y el script espera 14 segundos en total antes de registrar el error.
 - El `ingestion_log` vive en `data/taxi.duckdb`. Si se borra la carpeta `data/`, se pierde el historial y la siguiente corrida descarga todo de nuevo.
 - La tabla `yellow_trips` se crea con las columnas del contrato la primera vez. Si el contrato cambia, hay que borrar `data/taxi.duckdb` y volver a correr el pipeline.
 - La detección de duplicados compara todas las columnas de todas las filas del mes. Es el paso que más memoria usa del pipeline.
+- Reprocesar un mes da las mismas filas, pero el archivo Parquet puede variar unos bytes, porque el orden de las filas no está fijado y eso cambia la compresión. Ordenar al escribir lo haría idéntico a costa de más tiempo y memoria.
 
 ## Tiempo de ejecución y pico de RAM
 
