@@ -42,11 +42,22 @@ Criterio de severidad: **rechazo** cuando la fila describe algo imposible o no s
 - Una condición que da nulo porque le falta un dato se toma como "no viola la regla".
 - La velocidad queda nula cuando la distancia es menor o igual a 0, y la propina como porcentaje de la tarifa queda nula cuando la tarifa es menor o igual a 0.
 
+**Resultado de la validación** (salida de `python -m src.calidad --mes AAAA-MM`)
+
+| | Marzo 2024 | Marzo 2025 |
+| --- | --- | --- |
+| Filas leídas | 3.582.628 | 4.145.257 |
+| Aceptadas | 3.535.924 | 4.053.200 |
+| En cuarentena | 46.704 (1,30 %) | 92.057 (2,22 %) |
+
+En los dos meses se cumple leídas = aceptadas + cuarentena. Si no se cumpliera, el pipeline termina con código de salida 1.
+
 ## Limitaciones conocidas
 
 - La ingesta reintenta ante cualquier error de descarga, también los que no se arreglan reintentando. Un mes que todavía no está publicado devuelve `403 Forbidden` (probado con `2031-01`) y el script espera 14 segundos en total antes de registrar el error.
 - El `ingestion_log` vive en `data/taxi.duckdb`. Si se borra la carpeta `data/`, se pierde el historial y la siguiente corrida descarga todo de nuevo.
 - La tabla `yellow_trips` se crea con las columnas del contrato la primera vez. Si el contrato cambia, hay que borrar `data/taxi.duckdb` y volver a correr el pipeline.
+- La detección de duplicados compara todas las columnas de todas las filas del mes. Es el paso que más memoria usa del pipeline.
 
 ## Tiempo de ejecución y pico de RAM
 
