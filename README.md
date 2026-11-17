@@ -2,6 +2,33 @@
 
 ## Cómo instalar y ejecutar
 
+Requisitos: Python 3.10 o superior (probado con 3.11), `make` y conexión a internet. Los datos no están en el repositorio: el pipeline los descarga.
+
+```bash
+git clone https://github.com/Kevin2407/nyc-taxi-pipeline.git
+cd nyc-taxi-pipeline
+make all MES=2025-03
+```
+
+Ese comando crea el entorno virtual `.venv`, instala `requirements.txt` y corre las cinco etapas para el mes pedido y el mismo mes del año anterior (acá, marzo 2025 y marzo 2024). Al final muestra las respuestas a las seis preguntas.
+
+Si `python3` en la máquina es otra versión, se puede indicar cuál usar para crear el entorno:
+
+```bash
+make all MES=2025-03 PYTHON_BASE=python3.11
+```
+
+Otros comandos:
+
+| Comando | Qué hace |
+| --- | --- |
+| `make test` | Corre los tests automáticos |
+| `make ingesta MES=...` (o `esquema`, `calidad`, `transformacion`, `modelo`) | Corre hasta esa etapa inclusive |
+| `make -n all MES=...` | Muestra los comandos que correría, sin ejecutarlos |
+| `make limpiar-datos` | Borra `data/` para correr desde cero |
+
+Correr `make all` dos veces deja los mismos conteos: la ingesta no vuelve a descargar y cada etapa reemplaza solo los datos de su mes.
+
 ## Arquitectura
 
 ## Decisiones
@@ -112,4 +139,4 @@ Modelo estrella en `data/taxi.duckdb`, construido por `src/modelo.py` con los SQ
 | Herramienta | Para qué se usó |
 | --- | --- |
 | GitHub Copilot | Generar la estructura inicial de carpetas y archivos vacíos (PR #1) |
-| Claude | Guía paso a paso y explicación de conceptos y herramientas. Propuesta del código Python de `src/`, que escribimos, ejecutamos y probamos nosotros. Redacción de `exploracion/HALLAZGOS.md`, `DECISIONES.md`, `RESULTADOS.md` y las secciones de decisiones de este README a partir de nuestras corridas. Escribió los scripts `exploracion/explorar_umbrales.py` y `exploracion/explorar_resultados.py`, y los SQL de `sql/modelo/` y `sql/preguntas/` |
+| Claude | Guía paso a paso y explicación de conceptos y herramientas. Propuesta del código Python de `src/`, que escribimos, ejecutamos y probamos nosotros. Redacción de `exploracion/HALLAZGOS.md`, `DECISIONES.md`, `RESULTADOS.md` y las secciones de decisiones de este README a partir de nuestras corridas. Escribió los scripts `exploracion/explorar_umbrales.py` y `exploracion/explorar_resultados.py`, los SQL de `sql/modelo/` y `sql/preguntas/`, y el `Makefile` |

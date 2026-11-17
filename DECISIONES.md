@@ -56,3 +56,8 @@
 | 2026-11-17 | Rankings por zona sin las zonas 264 y 265 (R11) | No son un lugar real |
 | 2026-11-17 | Pregunta (c): solo zonas con al menos 1.000 viajes en el mes | Sin mínimo, el ranking lo encabezan zonas con 1 o 2 viajes al 100 %, que no dicen nada |
 | 2026-11-17 | El mes de comparación es el mismo mes del año anterior, calculado a partir de `--mes` | Lo pide la consigna; así el comando recibe un solo parámetro |
+| 2026-11-17 | Makefile con un objetivo por etapa, encadenados por dependencias (`all → modelo → transformacion → calidad → esquema → ingesta`) | Se puede correr el pipeline entero o hasta una etapa. Make frena en el primer comando que devuelve código distinto de 0 |
+| 2026-11-17 | El mes de comparación lo calcula el Makefile (`MES_ANTERIOR`) restando un año a `MES` | El comando recibe un solo parámetro, como pide la consigna |
+| 2026-11-17 | El Makefile crea `.venv` si no existe y reinstala dependencias solo si cambió `requirements.txt` (marca `.venv/.instalado`) | Quien clona corre un solo comando sin preparar nada. Las corridas siguientes no reinstalan |
+| 2026-11-17 | `PYTHON_BASE` configurable (por defecto `python3`) | El Python por defecto de cada máquina es distinto; en la Mac de Kevin `python3` es 3.14 y usamos 3.11 |
+| 2026-11-17 | El Makefile lo escribió Claude directamente en el repo | Las líneas de comandos de Make tienen que empezar con tabulador, y al copiar desde un chat suelen quedar espacios |
