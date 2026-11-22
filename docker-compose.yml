@@ -108,6 +108,33 @@ services:
     depends_on:
       - prometheus
 
+  # ---------- Pipeline ----------
+
+  # Caja de herramientas: no arranca con "docker compose up" y no es lo que corre
+  # el pipeline (eso lo hará Dagster, que sí queda prendido). Sirve para correr
+  # comandos sueltos mientras desarrollamos, por ejemplo:
+  #   docker compose run --rm herramientas dbt --version
+  herramientas:
+    build: .
+    image: nyc-taxi-pipeline:local
+    profiles: ["herramientas"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-taxi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
+      POSTGRES_DB: ${POSTGRES_DB:-taxi}
+      PUSHGATEWAY_URL: http://pushgateway:9091
+      MES: ${MES:-2025-03}
+    volumes:
+      - ./:/app                          # el código de la máquina, en vivo
+    networks:
+      - pipeline_net
+    mem_limit: 2g
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   promdata:

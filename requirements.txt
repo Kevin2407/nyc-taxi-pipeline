@@ -1,4 +1,28 @@
-duckdb==2.0.0
-pyyaml==6.0.3
+# Dependencias del contenedor del pipeline (imagen definida en Dockerfile).
+# Versiones fijas: las que se instalaron y probaron el 22/11/2026. Así todos
+# (la Mac, el Ubuntu del compañero y la máquina del profe) usan exactamente lo mismo.
+
+# Ingesta
+dlt[postgres]==1.32.0
 requests==2.34.2
+
+# Transformación (dbt Core 1.x, la línea que se vio en clase con dbt-postgres)
+dbt-core==1.12.7
+dbt-postgres==1.11.0
+
+# Orquestación
+dagster==1.13.31
+dagster-webserver==1.13.31
+dagster-postgres==0.29.31
+dagster-dbt==0.29.31
+
+# Capa curada en Parquet (paso 5b)
+duckdb==2.0.1
+
+# Métricas de los procesos
+psutil==7.2.2
+prometheus-client==0.26.0
+
+# Utilidades y tests
+PyYAML==6.0.4
 pytest==9.2.0
