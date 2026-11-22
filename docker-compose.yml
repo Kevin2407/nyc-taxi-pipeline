@@ -1,0 +1,60 @@
+# Pipeline NYC Taxi - stack de clase.
+#
+# Uso:  docker compose up -d        (levanta todo en segundo plano)
+#       docker compose ps           (estado de cada servicio)
+#       docker compose logs -f postgres
+#       docker compose down         (apaga todo; los datos quedan en los volúmenes)
+#
+# Todas las variables tienen un valor por defecto, así que no hace falta un .env
+# para correrlo. Para cambiarlas, copiar .env.example a .env y editarlo.
+
+name: nyc-taxi
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-taxi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
+      POSTGRES_DB: ${POSTGRES_DB:-taxi}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"   # para DBeaver desde la máquina: localhost:5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - pipeline_net
+    shm_size: 256mb
+    mem_limit: 1536m                    # techo de RAM del contenedor (máquina de 8 GB)
+    command:
+      - postgres
+      # Memoria: pensada para que Postgres use como mucho ~1,5 GB.
+      - -c
+      - shared_buffers=384MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - effective_cache_size=1GB
+      # Escritura: cargas grandes sin frenar en checkpoints.
+      - -c
+      - max_wal_size=2GB
+      # Logs a la salida estándar del contenedor, para verlos con docker logs / Loki.
+      - -c
+      - log_min_duration_statement=1000   # toda consulta de más de 1 s queda en el log
+      - -c
+      - log_checkpoints=on
+      - -c
+      - log_connections=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taxi} -d ${POSTGRES_DB:-taxi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+
+networks:
+  pipeline_net:
+    driver: bridge
