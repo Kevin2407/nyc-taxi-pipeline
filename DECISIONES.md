@@ -68,3 +68,17 @@
 | 2026-11-17 | Tiempo y RAM medidos con `/usr/bin/time -l make all` después de `make limpiar-datos` | Es lo que vive quien clona el repo: incluye descargas y todas las etapas. Resultado: 20,3 s y 1,29 GB de pico en la Mac M2 de 8 GB |
 | 2026-11-17 | `make limpiar-datos` reintenta el borrado una vez | En macOS el Finder puede crear un `.DS_Store` en medio del borrado y hacer fallar `rm -rf` |
 | 2026-11-17 | Prueba de reproducibilidad: clon nuevo en Ubuntu, `make all` y `make test` sin preparación previa | Simula lo que hará la cátedra. Mismos hashes, mismos conteos, mismas respuestas y los 4 tests pasan |
+| 2026-11-21 | Rehacer el pipeline con el stack visto en clase: dlt, PostgreSQL, dbt, Dagster, Prometheus y Grafana, todo en Docker | En la consulta del 17/11 el profe pidió usar un ingestador en lugar de cargar con DuckDB, hacer el análisis en dbt, observar la base y los procesos, y usar Docker con su red. La consigna escrita permitía DuckDB; la versión anterior queda en `master` |
+| 2026-11-21 | Ingestador: dlt y no Airbyte | El profe propuso dlt y dijo que Airbyte es pesado. Airbyte pide 8 GB solo para él, se instala aparte con `abctl` (su propio Kubernetes) y su configuración queda en su base interna, fuera del repo. dlt es una librería de Python que entra en el mismo contenedor |
+| 2026-11-22 | Todo corre en contenedores de una red propia (`pipeline_net`); la máquina solo necesita Docker | Mac, Ubuntu y Windows corren lo mismo, sin depender de la versión de Python ni de `make`. Los servicios se hablan por nombre (`postgres:5432`) |
+| 2026-11-22 | Postgres con techo de 1,5 GB (`mem_limit`) y `shared_buffers=384MB`, `work_mem=32MB` | La máquina de referencia tiene 8 GB que comparte con el resto del stack |
+| 2026-11-22 | Postgres manda al log las consultas de más de 1 s, las conexiones y los checkpoints | Es lo que se mira en los logs para entender qué pasa en la base durante la carga y la transformación |
+| 2026-11-22 | Grafana en el puerto 3001 | El 3000 queda para la web de Dagster |
+| 2026-11-22 | Imágenes de Docker y librerías de Python con versión fija | `latest` puede cambiar entre hoy y la defensa; así la cátedra baja exactamente lo mismo |
+| 2026-11-22 | dbt Core 1.x y no dbt v2 | Es la línea que se vio en clase con dbt-postgres y la que soporta la integración de Dagster |
+| 2026-11-22 | Un solo Dockerfile para todo el código nuestro; el servicio `herramientas` es solo para comandos sueltos | Lo que anda en `herramientas` anda igual cuando lo corre Dagster, porque es la misma imagen |
+| 2026-11-22 | Ingesta: dlt carga a `raw.yellow_trips` con `merge` + `delete-insert` y clave `mes_archivo` | Antes de insertar un mes, dlt borra las filas que ya tenía de ese mes: recargarlo no duplica y no toca los demás |
+| 2026-11-22 | Las fechas de subida y bajada se cargan sin zona horaria (`timezone: False`) | Son hora local de Nueva York. Sin esa aclaración dlt las guarda como UTC y en DBeaver y en las consultas por hora aparecen corridas 3 horas |
+| 2026-11-22 | `ingestion_log` vive en Postgres (`raw.ingestion_log`) y lo escribe dlt; `ok` se anota recién después de cargar | Así `ok` significa "descargado y cargado". Si la carga falla, la próxima corrida lo vuelve a intentar |
+| 2026-11-22 | snake_case lo hace la convención de nombres de dlt | Pasa `PULocationID` a `pu_location_id` igual que la función propia que teníamos, sin código nuestro |
+| 2026-11-22 | `LOAD__TRUNCATE_STAGING_DATASET=true` | El merge de dlt pasa por `raw_staging`; sin vaciarlo quedan dos copias de cada mes en disco |

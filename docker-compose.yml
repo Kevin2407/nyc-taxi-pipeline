@@ -124,6 +124,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-taxi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
       POSTGRES_DB: ${POSTGRES_DB:-taxi}
+      # dlt lee de acá a qué base cargar (formato DESTINATION__<destino>__CREDENTIALS)
+      DESTINATION__POSTGRES__CREDENTIALS: postgresql://${POSTGRES_USER:-taxi}:${POSTGRES_PASSWORD:-taxi}@postgres:5432/${POSTGRES_DB:-taxi}
+      # El merge de dlt carga primero a raw_staging y después pasa los datos a raw.
+      # Con esto vacía raw_staging al terminar, para no guardar dos copias del mes.
+      LOAD__TRUNCATE_STAGING_DATASET: "true"
       PUSHGATEWAY_URL: http://pushgateway:9091
       MES: ${MES:-2025-03}
     volumes:

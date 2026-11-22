@@ -3,7 +3,7 @@
 # (la Mac, el Ubuntu del compañero y la máquina del profe) usan exactamente lo mismo.
 
 # Ingesta
-dlt[postgres]==1.32.0
+dlt[postgres,parquet]==1.32.0
 requests==2.34.2
 
 # Transformación (dbt Core 1.x, la línea que se vio en clase con dbt-postgres)
