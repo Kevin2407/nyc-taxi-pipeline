@@ -1,0 +1,21 @@
+# Qué mide Prometheus y cada cuánto. Los destinos son nombres de servicio del
+# docker-compose: dentro de la red pipeline_net se resuelven solos.
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # La base: estadísticas de Postgres traducidas a métricas por postgres-exporter.
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # Los pasos del pipeline: cada uno deja sus métricas en el Pushgateway al terminar.
+  # honor_labels conserva las etiquetas que puso el paso (por ejemplo, etapa y mes).
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

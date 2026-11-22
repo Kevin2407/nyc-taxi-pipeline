@@ -52,8 +52,66 @@ services:
       timeout: 5s
       retries: 10
 
+  # ---------- Observabilidad ----------
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      # "postgres" es el nombre del servicio: lo resuelve el DNS interno de la red
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-taxi}:${POSTGRES_PASSWORD:-taxi}@postgres:5432/${POSTGRES_DB:-taxi}?sslmode=disable"
+    networks:
+      - pipeline_net
+    mem_limit: 64m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pushgateway:
+    image: prom/pushgateway:v1.11.1
+    ports:
+      - "9091:9091"                     # http://localhost:9091 muestra lo que dejaron los pasos
+    networks:
+      - pipeline_net
+    mem_limit: 64m
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./observabilidad/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"                     # http://localhost:9090
+    networks:
+      - pipeline_net
+    mem_limit: 512m
+    depends_on:
+      - postgres-exporter
+      - pushgateway
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./observabilidad/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observabilidad/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3001:3000"                     # http://localhost:3001 (el 3000 queda para Dagster)
+    networks:
+      - pipeline_net
+    mem_limit: 256m
+    depends_on:
+      - prometheus
+
 volumes:
   pgdata:
+  promdata:
+  grafanadata:
 
 networks:
   pipeline_net:
