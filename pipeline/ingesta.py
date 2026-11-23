@@ -4,6 +4,7 @@ Descarga el archivo del mes a data/raw sin modificarlo (con hash, reintentos y l
 y lo carga a Postgres con dlt, en la tabla raw.yellow_trips.
 
 Uso (desde el contenedor):  python -m pipeline.ingesta --mes 2025-03
+                            python -m pipeline.ingesta --mes 2025-03 --forzar
 """
 import argparse
 import hashlib
@@ -20,6 +21,8 @@ import pyarrow.parquet as pq
 import requests
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.pipeline.exceptions import PipelineStepFailed
+
+from pipeline.esquema import ajustar_al_contrato, cargar_contrato, validar_archivo
 
 URL_BASE = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 URL_ZONAS = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
@@ -119,12 +122,13 @@ def crear_pipeline():
         "tpep_dropoff_datetime": SIN_ZONA_HORARIA,
     },
 )
-def viajes(ruta, mes):
-    """Lee el Parquet de a lotes y agrega de qué archivo y de qué mes viene cada fila.
-    dlt pasa los nombres a snake_case solo (PULocationID -> pu_location_id)."""
+def viajes(ruta, mes, contrato):
+    """Lee el Parquet de a lotes, deja cada lote con las columnas del contrato
+    (snake_case, cbd_congestion_fee nula si falta, columnas nuevas afuera) y agrega
+    de qué archivo y de qué mes viene cada fila."""
     archivo = pq.ParquetFile(ruta)
     for lote in archivo.iter_batches(batch_size=FILAS_POR_LOTE):
-        tabla = pa.Table.from_batches([lote])
+        tabla = ajustar_al_contrato(pa.Table.from_batches([lote]), contrato)
         filas = tabla.num_rows
         tabla = tabla.append_column("archivo_origen", pa.array([ruta.name] * filas))
         tabla = tabla.append_column("mes_archivo", pa.array([mes] * filas))
@@ -185,21 +189,33 @@ def ultimo_hash_ok(pipeline, archivo):
 
 # ---------- 4. Ingesta de punta a punta ----------
 
-def ingestar(pipeline, url, destino, recurso):
-    """Descarga y carga un archivo. Devuelve True si quedó bien, False si falló."""
+def ingestar(pipeline, url, destino, recurso, validar=None, forzar=False):
+    """Descarga, valida y carga un archivo. Devuelve True si quedó bien, False si falló.
+    validar: función que se llama antes de cargar; si devuelve False, no se carga.
+    forzar: vuelve a validar y cargar aunque el archivo ya esté ingestado."""
     nombre = destino.name
 
     # Idempotencia: si el archivo está y su hash es el de la última ingesta ok, no se hace nada.
-    if destino.exists() and calcular_hash(destino) == ultimo_hash_ok(pipeline, nombre):
+    ya_ingestado = destino.exists() and calcular_hash(destino) == ultimo_hash_ok(pipeline, nombre)
+    if ya_ingestado and not forzar:
         print(f"Sin cambios: {nombre} ya está descargado y cargado. No se hace nada.")
         return True
 
-    print("Descargando", url)
-    try:
-        descargar_con_reintentos(url, destino)
-    except requests.RequestException as error:
-        registrar(pipeline, nombre, url, None, None, None, "error", str(error))
-        print(f"ERROR: no se pudo descargar {nombre}.")
+    if ya_ingestado:
+        print(f"--forzar: {nombre} ya está descargado; se vuelve a validar y cargar sin bajarlo.")
+    else:
+        print("Descargando", url)
+        try:
+            descargar_con_reintentos(url, destino)
+        except requests.RequestException as error:
+            registrar(pipeline, nombre, url, None, None, None, "error", str(error))
+            print(f"ERROR: no se pudo descargar {nombre}.")
+            return False
+
+    # Contrato de esquema: se compara ANTES de cargar.
+    if validar is not None and not validar():
+        registrar(pipeline, nombre, url, None, None, None, "error", "no cumple el contrato de esquema")
+        print(f"ERROR: {nombre} no cumple el contrato de esquema. No se carga.")
         return False
 
     print(f"Cargando {nombre} a Postgres con dlt...")
@@ -225,18 +241,25 @@ def ingestar(pipeline, url, destino, recurso):
 def main():
     parser = argparse.ArgumentParser(description="Descarga un mes de taxis amarillos y lo carga a Postgres.")
     parser.add_argument("--mes", required=True, help="Mes a ingestar, formato AAAA-MM")
+    parser.add_argument("--forzar", action="store_true",
+                        help="Vuelve a validar y cargar el mes aunque ya esté ingestado")
     args = parser.parse_args()
 
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", args.mes):
         parser.error("--mes tiene que tener formato AAAA-MM, por ejemplo 2025-03")
 
     pipeline = crear_pipeline()
+    contrato = cargar_contrato()
     url, destino = armar_rutas(args.mes)
 
     # viajes(...) y zonas(...) no leen nada todavía: preparan el resource.
     # El archivo se lee recién cuando pipeline.run lo consume, después de la descarga.
     zonas_ok = ingestar(pipeline, URL_ZONAS, RUTA_ZONAS, zonas(RUTA_ZONAS))
-    mes_ok = ingestar(pipeline, url, destino, viajes(destino, args.mes))
+    mes_ok = ingestar(
+        pipeline, url, destino, viajes(destino, args.mes, contrato),
+        validar=lambda: validar_archivo(pipeline, destino, contrato),
+        forzar=args.forzar,
+    )
 
     if not (zonas_ok and mes_ok):
         sys.exit(1)

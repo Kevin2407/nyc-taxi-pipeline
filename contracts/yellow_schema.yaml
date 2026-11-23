@@ -1,64 +1,82 @@
-version: 1
+# Contrato de esquema del archivo de taxis amarillos.
+#
+# name: nombre de la columna ya pasada a snake_case (PULocationID -> pu_location_id),
+#       con la misma regla que usa dlt.
+# type: tipo de Arrow con el que tiene que venir en el Parquet. Se compara contra
+#       el esquema real del archivo ANTES de cargarlo (pipeline/esquema.py).
+# opcional: true si la columna puede faltar en un archivo. Si falta, se carga nula.
+#
+# Qué hace el pipeline con las diferencias:
+#   columna obligatoria faltante o tipo distinto  -> no carga el archivo y termina con error
+#   columna opcional faltante                     -> la carga nula y sigue
+#   columna nueva (no está acá)                   -> la reporta, no la carga y sigue
+#
+# Para aceptar una columna nueva: agregarla acá y subir version. El cambio queda en Git.
+#
+# v1 (16/11/2026): tipos de DuckDB, para la versión anterior del pipeline.
+# v2 (22/11/2026): tipos de Arrow, para la ingesta con dlt.
+
+version: 2
 tabla: yellow_trips
 columns:
   - name: vendor_id
-    type: INTEGER
+    type: int32
     descripcion: Proveedor del taxímetro que registró el viaje
   - name: tpep_pickup_datetime
-    type: TIMESTAMP
-    descripcion: Fecha y hora de subida
+    type: timestamp[us]
+    descripcion: Fecha y hora de subida (hora local de Nueva York, sin zona horaria)
   - name: tpep_dropoff_datetime
-    type: TIMESTAMP
-    descripcion: Fecha y hora de bajada
+    type: timestamp[us]
+    descripcion: Fecha y hora de bajada (hora local de Nueva York, sin zona horaria)
   - name: passenger_count
-    type: BIGINT
+    type: int64
     descripcion: Cantidad de pasajeros, cargada por el chofer
   - name: trip_distance
-    type: DOUBLE
+    type: double
     descripcion: Distancia del viaje en millas
   - name: ratecode_id
-    type: BIGINT
+    type: int64
     descripcion: Código de la tarifa aplicada
   - name: store_and_fwd_flag
-    type: VARCHAR
+    type: large_string
     descripcion: Si el viaje se guardó en el vehículo antes de enviarse (Y/N)
   - name: pu_location_id
-    type: INTEGER
+    type: int32
     descripcion: Zona de subida
   - name: do_location_id
-    type: INTEGER
+    type: int32
     descripcion: Zona de bajada
   - name: payment_type
-    type: BIGINT
+    type: int64
     descripcion: Forma de pago (0 flexible, 1 tarjeta, 2 efectivo, 3 sin cargo, 4 disputa)
   - name: fare_amount
-    type: DOUBLE
+    type: double
     descripcion: Tarifa del viaje, sin recargos ni propina
   - name: extra
-    type: DOUBLE
+    type: double
     descripcion: Recargos varios
   - name: mta_tax
-    type: DOUBLE
+    type: double
     descripcion: Impuesto MTA
   - name: tip_amount
-    type: DOUBLE
+    type: double
     descripcion: Propina (solo se registra la pagada con tarjeta)
   - name: tolls_amount
-    type: DOUBLE
+    type: double
     descripcion: Peajes
   - name: improvement_surcharge
-    type: DOUBLE
+    type: double
     descripcion: Recargo de mejora
   - name: total_amount
-    type: DOUBLE
+    type: double
     descripcion: Importe total cobrado
   - name: congestion_surcharge
-    type: DOUBLE
+    type: double
     descripcion: Recargo de congestión del estado de Nueva York
   - name: airport_fee
-    type: DOUBLE
+    type: double
     descripcion: Cargo por subir en los aeropuertos
   - name: cbd_congestion_fee
-    type: DOUBLE
+    type: double
     opcional: true
     descripcion: Cargo de la zona de congestión de Manhattan; existe desde 2025
