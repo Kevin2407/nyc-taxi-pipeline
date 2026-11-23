@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: trips_curados
+    description: >
+      Capa curada: una fila por viaje aceptado, con duración, velocidad, fecha, hora,
+      día de la semana, propina % y barrio y zona de origen y destino.
+    columns:
+      - name: duracion_min
+        data_tests: [not_null]
+      - name: fecha_subida
+        data_tests: [not_null]
+      - name: hora_subida
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+                quote: false
+      - name: dia_semana
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7]
+                quote: false
+      - name: pu_zone
+        data_tests: [not_null]
+      - name: do_zone
+        data_tests: [not_null]

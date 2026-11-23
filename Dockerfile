@@ -8,6 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# git: dbt lo pide en su chequeo (dbt debug), aunque no usamos paquetes de terceros.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Primero solo requirements.txt: si el código cambia pero las dependencias no,

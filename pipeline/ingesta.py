@@ -96,9 +96,14 @@ def contar_filas(ruta):
 
 # ---------- 2. dlt: qué se carga y cómo ----------
 
-# Los horarios del archivo son hora local de Nueva York, sin zona horaria.
-# Sin esta aclaración dlt los guarda como UTC y en DBeaver aparecen corridos.
-SIN_ZONA_HORARIA = {"data_type": "timestamp", "timezone": False}
+def sin_zona_horaria():
+    """Aclaración para dlt: la columna es una fecha y hora SIN zona horaria.
+    Los horarios del archivo son hora local de Nueva York; sin esto dlt los guarda
+    como UTC y en DBeaver aparecen corridos.
+    Es una función y no una constante porque dlt le escribe adentro el nombre de la
+    columna: si las dos columnas compartieran el mismo diccionario, la segunda
+    quedaría pisada (nos pasó: tpep_dropoff_datetime se cargó con zona horaria)."""
+    return {"data_type": "timestamp", "timezone": False}
 
 
 def crear_pipeline():
@@ -118,8 +123,8 @@ def crear_pipeline():
     write_disposition={"disposition": "merge", "strategy": "delete-insert"},
     merge_key="mes_archivo",
     columns={
-        "tpep_pickup_datetime": SIN_ZONA_HORARIA,
-        "tpep_dropoff_datetime": SIN_ZONA_HORARIA,
+        "tpep_pickup_datetime": sin_zona_horaria(),
+        "tpep_dropoff_datetime": sin_zona_horaria(),
     },
 )
 def viajes(ruta, mes, contrato):

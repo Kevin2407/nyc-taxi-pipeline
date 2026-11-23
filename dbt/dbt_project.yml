@@ -27,6 +27,9 @@ models:
     calidad:
       +schema: calidad          # tablas: reglas, válidos, cuarentena y reportes
       +materialized: table
+    curado:
+      +schema: curado           # viajes válidos con columnas derivadas y zonas
+      +materialized: table
 
 seeds:
   taxi:
