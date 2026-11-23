@@ -1,0 +1,17 @@
+# Configuración de la instancia de Dagster (va en DAGSTER_HOME).
+# Historial de corridas, eventos, logs y estado de sensores: en la base "dagster" de Postgres,
+# así lo comparten la web, el daemon y las corridas lanzadas desde la terminal.
+storage:
+  postgres:
+    postgres_db:
+      hostname:
+        env: POSTGRES_HOST
+      username:
+        env: POSTGRES_USER
+      password:
+        env: POSTGRES_PASSWORD
+      db_name: dagster
+      port: 5432
+
+telemetry:
+  enabled: false

@@ -1,14 +1,53 @@
 # Pipeline NYC Taxi - stack de clase.
 #
-# Uso:  docker compose up -d        (levanta todo en segundo plano)
-#       docker compose ps           (estado de cada servicio)
-#       docker compose logs -f postgres
-#       docker compose down         (apaga todo; los datos quedan en los volúmenes)
+# Comando único (levanta todo lo necesario y corre el pipeline para MES y el mismo mes de 2024):
+#   docker compose run --rm pipeline
+#   docker compose run --rm -e MES=2025-04 pipeline        (otro mes)
+#
+# Dejar la plataforma prendida (Dagster, Grafana, Prometheus, Postgres):
+#   docker compose up -d
+#   docker compose ps                 (estado de cada servicio)
+#   docker compose logs -f postgres   (logs de un servicio)
+#   docker compose down               (apaga todo; los datos quedan en los volúmenes)
+#
+# Web:  Dagster http://localhost:3000 · Grafana http://localhost:3001 (admin/admin)
+#       Prometheus http://localhost:9090 · Pushgateway http://localhost:9091 · Postgres localhost:5432
 #
 # Todas las variables tienen un valor por defecto, así que no hace falta un .env
 # para correrlo. Para cambiarlas, copiar .env.example a .env y editarlo.
 
 name: nyc-taxi
+
+# Configuración común de los servicios que corren código nuestro (ver sección Pipeline).
+x-pipeline: &pipeline
+  build: .
+  image: nyc-taxi-pipeline:local
+  environment:
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_USER: ${POSTGRES_USER:-taxi}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
+    POSTGRES_DB: ${POSTGRES_DB:-taxi}
+    # dlt lee de acá a qué base cargar (formato DESTINATION__<destino>__CREDENTIALS)
+    DESTINATION__POSTGRES__CREDENTIALS: postgresql://${POSTGRES_USER:-taxi}:${POSTGRES_PASSWORD:-taxi}@postgres:5432/${POSTGRES_DB:-taxi}
+    # El merge de dlt carga primero a raw_staging y después pasa los datos a raw.
+    # Con esto vacía raw_staging al terminar, para no guardar dos copias del mes.
+    LOAD__TRUNCATE_STAGING_DATASET: "true"
+    # dbt busca acá el proyecto y la conexión (dbt/dbt_project.yml y dbt/profiles.yml)
+    DBT_PROJECT_DIR: /app/dbt
+    DBT_PROFILES_DIR: /app/dbt
+    DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+    # Dagster guarda su configuración (dagster.yaml) en esta carpeta
+    DAGSTER_HOME: /opt/dagster/home
+    PUSHGATEWAY_URL: http://pushgateway:9091
+    MES: ${MES:-2025-03}
+  volumes:
+    - ./:/app                                              # el código de la máquina, en vivo
+    - dagster_home:/opt/dagster/home                       # datos locales de Dagster
+    - ./dagster/dagster.yaml:/opt/dagster/home/dagster.yaml:ro
+  networks:
+    - pipeline_net
+  mem_limit: 2g
 
 services:
   postgres:
@@ -109,44 +148,71 @@ services:
       - prometheus
 
   # ---------- Pipeline ----------
+  # Todos los servicios de esta sección usan la misma imagen (Dockerfile) y la
+  # misma configuración, definida una sola vez en "x-pipeline" al principio del archivo.
 
-  # Caja de herramientas: no arranca con "docker compose up" y no es lo que corre
-  # el pipeline (eso lo hará Dagster, que sí queda prendido). Sirve para correr
-  # comandos sueltos mientras desarrollamos, por ejemplo:
+  # Caja de herramientas para comandos sueltos mientras desarrollamos. No arranca con "up".
   #   docker compose run --rm herramientas dbt --version
   herramientas:
-    build: .
-    image: nyc-taxi-pipeline:local
+    <<: *pipeline
     profiles: ["herramientas"]
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-taxi}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
-      POSTGRES_DB: ${POSTGRES_DB:-taxi}
-      # dlt lee de acá a qué base cargar (formato DESTINATION__<destino>__CREDENTIALS)
-      DESTINATION__POSTGRES__CREDENTIALS: postgresql://${POSTGRES_USER:-taxi}:${POSTGRES_PASSWORD:-taxi}@postgres:5432/${POSTGRES_DB:-taxi}
-      # El merge de dlt carga primero a raw_staging y después pasa los datos a raw.
-      # Con esto vacía raw_staging al terminar, para no guardar dos copias del mes.
-      LOAD__TRUNCATE_STAGING_DATASET: "true"
-      # dbt busca acá el proyecto y la conexión (dbt/dbt_project.yml y dbt/profiles.yml)
-      DBT_PROJECT_DIR: /app/dbt
-      DBT_PROFILES_DIR: /app/dbt
-      PUSHGATEWAY_URL: http://pushgateway:9091
-      MES: ${MES:-2025-03}
-    volumes:
-      - ./:/app                          # el código de la máquina, en vivo
-    networks:
-      - pipeline_net
-    mem_limit: 2g
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Corre una vez al levantar el stack y termina: crea la base "dagster" y el manifest de dbt.
+  preparar:
+    <<: *pipeline
+    command: ["python", "-m", "pipeline.preparar"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Web de Dagster: grafo de assets, corridas, logs, sensor. http://localhost:3000
+  dagster-webserver:
+    <<: *pipeline
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster/workspace.yaml"]
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      preparar:
+        condition: service_completed_successfully
+
+  # Daemon de Dagster: queda prendido y evalúa el sensor nuevo_mes_publicado.
+  dagster-daemon:
+    <<: *pipeline
+    command: ["dagster-daemon", "run", "-w", "/app/dagster/workspace.yaml"]
+    restart: unless-stopped
+    depends_on:
+      preparar:
+        condition: service_completed_successfully
+
+  # EL COMANDO ÚNICO. Levanta todo lo que hace falta y corre el job pipeline_completo
+  # para el mes de MES y el mismo mes del año anterior; termina cuando el pipeline termina.
+  #   docker compose run --rm pipeline
+  #   docker compose run --rm -e MES=2025-04 pipeline      (otro mes)
+  # La corrida queda registrada en Dagster y se ve en http://localhost:3000.
+  pipeline:
+    <<: *pipeline
+    profiles: ["ejecucion"]
+    command: ["dagster", "job", "execute", "-m", "pipeline.definitions", "-j", "pipeline_completo"]
+    depends_on:
+      preparar:
+        condition: service_completed_successfully
+      dagster-webserver:
+        condition: service_started
+      dagster-daemon:
+        condition: service_started
+      grafana:
+        condition: service_started
 
 volumes:
   pgdata:
   promdata:
   grafanadata:
+  dagster_home:
 
 networks:
   pipeline_net:

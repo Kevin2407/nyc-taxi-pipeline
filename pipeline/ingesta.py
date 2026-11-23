@@ -243,6 +243,24 @@ def ingestar(pipeline, url, destino, recurso, validar=None, forzar=False):
     return True
 
 
+def ingestar_mes(mes, forzar=False):
+    """Ingesta la tabla de zonas y el archivo del mes. Devuelve True si los dos quedaron bien.
+    La usan main() (línea de comandos) y Dagster (pipeline/definitions.py)."""
+    pipeline = crear_pipeline()
+    contrato = cargar_contrato()
+    url, destino = armar_rutas(mes)
+
+    # viajes(...) y zonas(...) no leen nada todavía: preparan el resource.
+    # El archivo se lee recién cuando pipeline.run lo consume, después de la descarga.
+    zonas_ok = ingestar(pipeline, URL_ZONAS, RUTA_ZONAS, zonas(RUTA_ZONAS))
+    mes_ok = ingestar(
+        pipeline, url, destino, viajes(destino, mes, contrato),
+        validar=lambda: validar_archivo(pipeline, destino, contrato),
+        forzar=forzar,
+    )
+    return zonas_ok and mes_ok
+
+
 def main():
     parser = argparse.ArgumentParser(description="Descarga un mes de taxis amarillos y lo carga a Postgres.")
     parser.add_argument("--mes", required=True, help="Mes a ingestar, formato AAAA-MM")
@@ -253,20 +271,7 @@ def main():
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", args.mes):
         parser.error("--mes tiene que tener formato AAAA-MM, por ejemplo 2025-03")
 
-    pipeline = crear_pipeline()
-    contrato = cargar_contrato()
-    url, destino = armar_rutas(args.mes)
-
-    # viajes(...) y zonas(...) no leen nada todavía: preparan el resource.
-    # El archivo se lee recién cuando pipeline.run lo consume, después de la descarga.
-    zonas_ok = ingestar(pipeline, URL_ZONAS, RUTA_ZONAS, zonas(RUTA_ZONAS))
-    mes_ok = ingestar(
-        pipeline, url, destino, viajes(destino, args.mes, contrato),
-        validar=lambda: validar_archivo(pipeline, destino, contrato),
-        forzar=args.forzar,
-    )
-
-    if not (zonas_ok and mes_ok):
+    if not ingestar_mes(args.mes, forzar=args.forzar):
         sys.exit(1)
 
 

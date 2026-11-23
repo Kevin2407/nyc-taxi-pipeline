@@ -1,3 +1,4 @@
+{{ config(meta={'dagster': {'ref': {'name': 'trips_curados'}}}) }}
 -- La capa curada tiene que tener exactamente las filas aceptadas, mes por mes:
 -- si el cruce con zonas perdiera o duplicara filas, este test devuelve el mes y falla.
 with validos as (
