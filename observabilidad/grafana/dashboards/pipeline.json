@@ -168,13 +168,17 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
         },
         "overrides": []
       },
       "options": {
         "orientation": "horizontal",
-        "displayMode": "gradient",
+        "displayMode": "basic",
         "showUnfilled": true,
         "reduceOptions": {
           "calcs": [
@@ -189,7 +193,7 @@
       "id": 4,
       "type": "bargauge",
       "title": "Pico de RAM por etapa (proceso + subprocesos)",
-      "description": "Medido con psutil cada 0,5 s. La máquina de referencia tiene 8 GB.",
+      "description": "Medido con psutil cada 0,5 s. Verde: menos de 1,5 GB; naranja: hasta 3 GB; rojo: más (la máquina de referencia tiene 8 GB).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -215,13 +219,33 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes"
+          "unit": "bytes",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1500000000.0
+              },
+              {
+                "color": "red",
+                "value": 3000000000.0
+              }
+            ]
+          }
         },
         "overrides": []
       },
       "options": {
         "orientation": "horizontal",
-        "displayMode": "gradient",
+        "displayMode": "basic",
         "showUnfilled": true,
         "reduceOptions": {
           "calcs": [
@@ -262,13 +286,17 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
         },
         "overrides": []
       },
       "options": {
         "orientation": "horizontal",
-        "displayMode": "gradient",
+        "displayMode": "basic",
         "showUnfilled": true,
         "reduceOptions": {
           "calcs": [
@@ -309,13 +337,18 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
       "options": {
         "orientation": "horizontal",
-        "displayMode": "gradient",
+        "displayMode": "basic",
         "showUnfilled": true,
         "reduceOptions": {
           "calcs": [
@@ -356,13 +389,17 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
         },
         "overrides": []
       },
       "options": {
         "orientation": "horizontal",
-        "displayMode": "gradient",
+        "displayMode": "basic",
         "showUnfilled": true,
         "reduceOptions": {
           "calcs": [

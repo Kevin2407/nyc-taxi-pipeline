@@ -10,6 +10,7 @@ import argparse
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -82,7 +83,9 @@ def exportar_mes(mes):
     """Escribe la partición del mes. Devuelve True si quedó con todas las filas."""
     destino = ruta_particion(mes)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    csv_temporal = destino.with_suffix(".csv.tmp")
+    # El CSV temporal va al disco propio del contenedor y no a data/: en Mac y Windows,
+    # data/ es una carpeta compartida con la máquina y escribir ahí 600 MB es lento.
+    csv_temporal = Path(tempfile.gettempdir()) / f"trips_{mes}.csv.tmp"
     parquet_temporal = destino.with_suffix(".tmp")
 
     tabla = f"{ESQUEMA_PG}.{TABLA_PG}"
@@ -113,10 +116,12 @@ def exportar_mes(mes):
             quoted_strings_can_be_null=False,
         ),
     )
-    with pq.ParquetWriter(parquet_temporal, esquema) as escritor:
-        for lote in lector:
-            escritor.write_batch(lote)
-    csv_temporal.unlink()
+    try:
+        with pq.ParquetWriter(parquet_temporal, esquema) as escritor:
+            for lote in lector:
+                escritor.write_batch(lote)
+    finally:
+        csv_temporal.unlink(missing_ok=True)
 
     # 3) Se reemplaza la partición de una sola vez: si algo se corta antes, la anterior queda intacta.
     parquet_temporal.replace(destino)
