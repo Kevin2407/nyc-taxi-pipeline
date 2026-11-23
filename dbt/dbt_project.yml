@@ -18,6 +18,8 @@ macro-paths: ["macros"]
 vars:
   distancia_maxima_millas: 100   # R04
   velocidad_maxima_mph: 80       # R10
+  # El mes asignado sale de la variable de entorno MES (docker-compose / .env).
+  # Para otro mes sin tocar nada:  dbt build --vars '{mes: 2025-04}'
 
 models:
   taxi:
@@ -29,6 +31,12 @@ models:
       +materialized: table
     curado:
       +schema: curado           # viajes válidos con columnas derivadas y zonas
+      +materialized: table
+    marts:
+      +schema: marts            # modelo estrella y tabla agregada
+      +materialized: table
+    preguntas:
+      +schema: preguntas        # una tabla por pregunta de negocio
       +materialized: table
 
 seeds:
