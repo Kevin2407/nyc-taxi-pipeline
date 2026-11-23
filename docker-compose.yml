@@ -129,6 +129,9 @@ services:
       # El merge de dlt carga primero a raw_staging y después pasa los datos a raw.
       # Con esto vacía raw_staging al terminar, para no guardar dos copias del mes.
       LOAD__TRUNCATE_STAGING_DATASET: "true"
+      # dbt busca acá el proyecto y la conexión (dbt/dbt_project.yml y dbt/profiles.yml)
+      DBT_PROJECT_DIR: /app/dbt
+      DBT_PROFILES_DIR: /app/dbt
       PUSHGATEWAY_URL: http://pushgateway:9091
       MES: ${MES:-2025-03}
     volumes:

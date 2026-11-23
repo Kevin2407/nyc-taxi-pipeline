@@ -1,0 +1,33 @@
+# Proyecto dbt del pipeline NYC Taxi.
+# dbt no procesa datos por su cuenta: arma el SQL de cada modelo y se lo manda a
+# Postgres en el orden que surge de los ref() entre modelos.
+#
+# Uso (desde el contenedor):  dbt build      (seeds, modelos y tests, en orden)
+
+name: taxi
+version: "2.0.0"
+config-version: 2
+profile: taxi
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+# Umbrales de las reglas de calidad. Cambiar un número acá cambia la regla, sin tocar SQL.
+vars:
+  distancia_maxima_millas: 100   # R04
+  velocidad_maxima_mph: 80       # R10
+
+models:
+  taxi:
+    staging:
+      +schema: staging          # vistas livianas sobre raw
+      +materialized: view
+    calidad:
+      +schema: calidad          # tablas: reglas, válidos, cuarentena y reportes
+      +materialized: table
+
+seeds:
+  taxi:
+    +schema: calidad

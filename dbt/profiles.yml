@@ -1,0 +1,14 @@
+# Conexión de dbt a Postgres. Los datos salen de las variables de entorno del
+# docker-compose, así que no hay contraseñas escritas en el repo.
+taxi:
+  target: docker
+  outputs:
+    docker:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'postgres') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | as_number }}"
+      user: "{{ env_var('POSTGRES_USER', 'taxi') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD', 'taxi') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'taxi') }}"
+      schema: analitica
+      threads: 2
