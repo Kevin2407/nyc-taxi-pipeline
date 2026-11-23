@@ -14,7 +14,7 @@ from pathlib import Path
 
 import dagster as dg
 import requests
-from dagster_dbt import DbtCliResource, DbtProject, dbt_assets, get_asset_key_for_model
+from dagster_dbt import DagsterDbtTranslator, DbtCliResource, DbtProject, dbt_assets, get_asset_key_for_model
 
 from pipeline import exportar, ingesta
 from pipeline.meses import es_mes_valido, mes_anterior, mes_siguiente
@@ -60,7 +60,17 @@ def ingesta_dlt(context: dg.AssetExecutionContext, config: ConfigMes):
 
 # ---------- Pasos 2 a 5: dbt ----------
 
-@dbt_assets(manifest=proyecto_dbt.manifest_path)
+class TraductorDbt(DagsterDbtTranslator):
+    """Agrupa cada modelo de dbt según su carpeta (staging, calidad, curado, marts, preguntas),
+    así el grafo de Dagster muestra las etapas del pipeline. El seed de reglas va con calidad."""
+
+    def get_group_name(self, dbt_resource_props):
+        if dbt_resource_props["resource_type"] == "seed":
+            return "calidad"
+        return dbt_resource_props["fqn"][1]  # ['taxi', '<carpeta>', '<modelo>']
+
+
+@dbt_assets(manifest=proyecto_dbt.manifest_path, dagster_dbt_translator=TraductorDbt())
 def modelos_dbt(context: dg.AssetExecutionContext, dbt: DbtCliResource, config: ConfigMes):
     """dbt build: staging, calidad, curado, modelo estrella y preguntas, con todos sus tests.
     Si un test falla (por ejemplo, la reconciliación), el paso falla y el pipeline se corta."""
