@@ -16,7 +16,9 @@ import dagster as dg
 import requests
 from dagster_dbt import DagsterDbtTranslator, DbtCliResource, DbtProject, dbt_assets, get_asset_key_for_model
 
-from pipeline import exportar, ingesta
+import pyarrow.parquet as pq
+
+from pipeline import exportar, ingesta, metricas
 from pipeline.meses import es_mes_valido, mes_anterior, mes_siguiente
 
 MES_POR_DEFECTO = os.environ.get("MES", "2025-03")
@@ -52,8 +54,11 @@ def ingesta_dlt(context: dg.AssetExecutionContext, config: ConfigMes):
     """Descarga y carga el mes asignado y el del año anterior (pipeline/ingesta.py)."""
     for mes in meses_de_la_corrida(config.mes):
         context.log.info(f"Ingesta de {mes}")
-        if not ingesta.ingestar_mes(mes):
-            raise dg.Failure(f"Falló la ingesta de {mes}. Ver raw.ingestion_log y el log de esta corrida.")
+        with metricas.medir("ingesta", mes, context.log.info) as medicion:
+            if not ingesta.ingestar_mes(mes):
+                raise dg.Failure(f"Falló la ingesta de {mes}. Ver raw.ingestion_log y el log de esta corrida.")
+            _, archivo = ingesta.armar_rutas(mes)
+            medicion.filas = ingesta.contar_filas(archivo)
     yield dg.MaterializeResult(asset_key=["raw", "yellow_trips"], metadata={"meses": ", ".join(meses_de_la_corrida(config.mes))})
     yield dg.MaterializeResult(asset_key=["raw", "zonas"])
 
@@ -75,7 +80,12 @@ def modelos_dbt(context: dg.AssetExecutionContext, dbt: DbtCliResource, config: 
     """dbt build: staging, calidad, curado, modelo estrella y preguntas, con todos sus tests.
     Si un test falla (por ejemplo, la reconciliación), el paso falla y el pipeline se corta."""
     variables = json.dumps({"mes": config.mes})
-    yield from dbt.cli(["build", "--vars", variables], context=context).stream()
+    with metricas.medir("dbt", config.mes, context.log.info) as medicion:
+        invocacion = dbt.cli(["build", "--vars", variables], context=context)
+        yield from invocacion.stream()
+        resultados = invocacion.get_artifact("run_results.json")
+        medicion.filas = metricas.filas_escritas_por_dbt(resultados)
+    metricas.publicar_modelos_dbt(config.mes, resultados, context.log.info)
 
 
 # ---------- Paso 6: capa curada en Parquet ----------
@@ -88,8 +98,10 @@ def modelos_dbt(context: dg.AssetExecutionContext, dbt: DbtCliResource, config: 
 def capa_curada_parquet(context: dg.AssetExecutionContext, config: ConfigMes):
     for mes in meses_de_la_corrida(config.mes):
         context.log.info(f"Exportación de {mes}")
-        if not exportar.exportar_mes(mes):
-            raise dg.Failure(f"Falló la exportación de {mes}.")
+        with metricas.medir("exportacion", mes, context.log.info) as medicion:
+            if not exportar.exportar_mes(mes):
+                raise dg.Failure(f"Falló la exportación de {mes}.")
+            medicion.filas = pq.ParquetFile(exportar.ruta_particion(mes)).metadata.num_rows
 
 
 # ---------- Job y sensor ----------
