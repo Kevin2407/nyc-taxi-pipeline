@@ -1,12 +1,15 @@
 # Resultados
 
-Mes asignado: **marzo 2025**, comparado contra **marzo 2024**. Se obtienen con:
+Mes asignado: **marzo 2025**, comparado contra **marzo 2024**.
+
+Cada pregunta es un modelo de dbt (un archivo en `sql/preguntas/`) que se guarda como tabla en el esquema `preguntas` de Postgres. Se construyen con el pipeline completo (`make all MES=2025-03`) y se muestran con:
 
 ```bash
-python -m src.modelo --mes 2025-03
+make respuestas MES=2025-03
+# o: docker compose run --rm herramientas python -m src.modelo --mes 2025-03 --solo-respuestas
 ```
 
-Todas las consultas corren sobre el modelo estrella (`fact_trips`, `dim_zone`, `dim_date`, `agg_zone_hour`), que contiene solo los viajes aceptados por las reglas de calidad: 3.535.924 de marzo 2024 y 4.053.200 de marzo 2025. Criterios comunes:
+Todas las consultas corren sobre el modelo estrella (`modelo.fact_trips`, `modelo.dim_zone`, `modelo.dim_date`, `modelo.agg_zone_hour`), que contiene solo los viajes aceptados por las reglas de calidad: 3.535.924 de marzo 2024 y 4.053.200 de marzo 2025. En el SQL, `{{ ref('...') }}` es la forma de dbt de nombrar otra tabla del proyecto, y `{{ mes_asignado() }}` / `{{ mes_anterior() }}` son el mes de la corrida y el mismo mes del año anterior. Criterios comunes:
 
 - La **tarifa media** se calcula sin los viajes con tarifa <= 0 (regla R09), porque esa tarifa no es válida.
 - Los rankings por zona excluyen las zonas 264 (Unknown) y 265 (Outside of NYC) (regla R11).
@@ -30,31 +33,31 @@ Todas las consultas corren sobre el modelo estrella (`fact_trips`, `dim_zone`, `
 
 **Interpretación:** nueve de las diez zonas son de Manhattan y crecieron hasta un 17,6 %; la única que cae es JFK, lo que sugiere que el aumento de viajes es urbano y no de aeropuerto.
 
-Consulta: `sql/preguntas/a_top10_zonas_origen.sql`
+Consulta: `sql/preguntas/pregunta_a_top10_zonas_origen.sql` (tabla `preguntas.pregunta_a_top10_zonas_origen`)
 
 ```sql
--- (a) Las 10 zonas de origen con más viajes en el mes y su variación contra el mismo mes del año anterior.
+-- (a) Las 10 zonas de origen con más viajes en el mes y su variación contra el mismo mes de 2024.
 -- Se excluyen las zonas 264 (Unknown) y 265 (Outside of NYC): no son un lugar (regla R11).
-WITH viajes_por_zona AS (
-    SELECT
+with viajes_por_zona as (
+    select
         a.pu_zone_id,
-        sum(a.viajes) FILTER (WHERE d.anio_mes = '{mes}') AS viajes_mes,
-        sum(a.viajes) FILTER (WHERE d.anio_mes = '{mes_anterior}') AS viajes_mes_anterior
-    FROM agg_zone_hour a
-    JOIN dim_date d ON a.fecha = d.fecha
-    WHERE a.pu_zone_id NOT IN (264, 265)
-    GROUP BY a.pu_zone_id
+        sum(a.viajes) filter (where d.anio_mes = '{{ mes_asignado() }}') as viajes_mes,
+        sum(a.viajes) filter (where d.anio_mes = '{{ mes_anterior() }}') as viajes_mes_anterior
+    from {{ ref('agg_zone_hour') }} a
+    join {{ ref('dim_date') }} d on a.fecha = d.fecha
+    where a.pu_zone_id not in (264, 265)
+    group by a.pu_zone_id
 )
-SELECT
-    z.zone AS zona_origen,
-    z.borough AS barrio,
+select
+    z.zone as zona_origen,
+    z.borough as barrio,
     v.viajes_mes,
     v.viajes_mes_anterior,
-    round(100.0 * (v.viajes_mes - v.viajes_mes_anterior) / v.viajes_mes_anterior, 1) AS variacion_pct
-FROM viajes_por_zona v
-JOIN dim_zone z ON v.pu_zone_id = z.zone_id
-ORDER BY v.viajes_mes DESC
-LIMIT 10;
+    round(100.0 * (v.viajes_mes - v.viajes_mes_anterior) / v.viajes_mes_anterior, 1) as variacion_pct
+from viajes_por_zona v
+join {{ ref('dim_zone') }} z on v.pu_zone_id = z.zone_id
+order by v.viajes_mes desc nulls last
+limit 10
 ```
 
 ## Pregunta b
@@ -66,29 +69,35 @@ LIMIT 10;
 | 2025-03 | 5 (5:00 a 5:59) | 32.592 | 33,75 USD |
 | 2024-03 | 5 (5:00 a 5:59) | 22.684 | 35,19 USD |
 
-**Interpretación:** a las 5 de la mañana hay pocos viajes pero largos: el 18 a 21 % toca un aeropuerto (contra 8 a 9 % en el resto del día) y la distancia media es de 5,7 millas contra 3,3 (datos de `exploracion/explorar_resultados.py`).
+**Interpretación:** a las 5 de la mañana hay pocos viajes pero largos: el 18 a 21 % toca un aeropuerto (contra 8 a 9 % en el resto del día) y la distancia media es de 5,7 millas contra 3,3 (datos de `exploracion/04_resultados.sql`).
 
-El ingreso es `total_amount`. El promedio se calcula como ingreso total / viajes de la hora, a partir de `agg_zone_hour`.
+El ingreso es `total_amount`. El promedio se calcula como ingreso total / viajes de la hora, a partir de `agg_zone_hour`. Postgres no tiene `QUALIFY`: `DISTINCT ON` se queda con la hora de mayor ingreso de cada mes.
 
-Consulta: `sql/preguntas/b_hora_mayor_ingreso.sql`
+Consulta: `sql/preguntas/pregunta_b_hora_mayor_ingreso.sql` (tabla `preguntas.pregunta_b_hora_mayor_ingreso`)
 
 ```sql
 -- (b) La hora del día con mayor ingreso promedio por viaje, en cada uno de los dos meses.
--- Ingreso por viaje = total_amount. Promedio = ingreso total / viajes de esa hora.
-SELECT
-    d.anio_mes,
-    a.hora_subida,
-    sum(a.viajes) AS viajes,
-    round(sum(a.ingreso_total) / sum(a.viajes), 2) AS ingreso_promedio
-FROM agg_zone_hour a
-JOIN dim_date d ON a.fecha = d.fecha
-WHERE d.anio_mes IN ('{mes}', '{mes_anterior}')
-GROUP BY d.anio_mes, a.hora_subida
-QUALIFY row_number() OVER (
-    PARTITION BY d.anio_mes
-    ORDER BY sum(a.ingreso_total) / sum(a.viajes) DESC
-) = 1
-ORDER BY d.anio_mes DESC;
+-- Ingreso por viaje = total_amount. Promedio = ingreso total / viajes de esa hora
+-- (no promedio de promedios, que daría mal con zonas de distinta cantidad de viajes).
+with por_hora as (
+    select
+        d.anio_mes,
+        a.hora_subida,
+        sum(a.viajes) as viajes,
+        sum(a.ingreso_total) / sum(a.viajes) as ingreso_promedio
+    from {{ ref('agg_zone_hour') }} a
+    join {{ ref('dim_date') }} d on a.fecha = d.fecha
+    where d.anio_mes in ('{{ mes_asignado() }}', '{{ mes_anterior() }}')
+    group by d.anio_mes, a.hora_subida
+)
+-- distinct on se queda con la primera fila de cada mes según el orden: la de mayor ingreso.
+select distinct on (anio_mes)
+    anio_mes,
+    hora_subida,
+    viajes,
+    round(ingreso_promedio::numeric, 2) as ingreso_promedio
+from por_hora
+order by anio_mes desc, ingreso_promedio desc
 ```
 
 ## Pregunta c
@@ -109,40 +118,40 @@ ORDER BY d.anio_mes DESC;
 
 Solo se consideran zonas con al menos 1.000 viajes en el mes: sin ese mínimo, el ranking lo encabezan zonas con 1 o 2 viajes al 100 %. Varias zonas empatan en 99,7 %; a igual proporción se ordena por cantidad de viajes. En marzo 2024 la columna no existía (es nula), por eso la pregunta es solo sobre el mes asignado.
 
-Consulta: `sql/preguntas/c_cbd_congestion.sql`
+Consulta: `sql/preguntas/pregunta_c_cbd_congestion.sql` (tabla `preguntas.pregunta_c_cbd_congestion`)
 
 ```sql
 -- (c) Porcentaje de viajes del mes con cbd_congestion_fee > 0, y las 5 zonas de origen
 -- con mayor proporción de esos viajes. Solo zonas con al menos 1.000 viajes en el mes:
 -- con menos, una zona con 1 o 2 viajes aparece con 100 %.
-WITH por_zona AS (
-    SELECT
+with por_zona as (
+    select
         f.pu_zone_id,
-        count(*) AS viajes,
-        count(*) FILTER (WHERE f.cbd_congestion_fee > 0) AS viajes_con_cbd
-    FROM fact_trips f
-    JOIN dim_date d ON f.fecha = d.fecha
-    WHERE d.anio_mes = '{mes}'
-    GROUP BY f.pu_zone_id
+        count(*) as viajes,
+        count(*) filter (where f.cbd_congestion_fee > 0) as viajes_con_cbd
+    from {{ ref('fact_trips') }} f
+    join {{ ref('dim_date') }} d on f.fecha = d.fecha
+    where d.anio_mes = '{{ mes_asignado() }}'
+    group by f.pu_zone_id
 ),
-total_mes AS (
-    SELECT round(100.0 * sum(viajes_con_cbd) / sum(viajes), 1) AS pct_mes
-    FROM por_zona
+total_mes as (
+    select round(100.0 * sum(viajes_con_cbd) / sum(viajes), 1) as pct_mes
+    from por_zona
 )
-SELECT
-    t.pct_mes AS pct_viajes_con_cbd_en_el_mes,
-    z.zone AS zona_origen,
-    z.borough AS barrio,
+select
+    t.pct_mes as pct_viajes_con_cbd_en_el_mes,
+    z.zone as zona_origen,
+    z.borough as barrio,
     p.viajes,
     p.viajes_con_cbd,
-    round(100.0 * p.viajes_con_cbd / p.viajes, 1) AS pct_zona
-FROM por_zona p
-JOIN dim_zone z ON p.pu_zone_id = z.zone_id
-CROSS JOIN total_mes t
-WHERE p.viajes >= 1000
-  AND p.pu_zone_id NOT IN (264, 265)
-ORDER BY pct_zona DESC, p.viajes DESC
-LIMIT 5;
+    round(100.0 * p.viajes_con_cbd / p.viajes, 1) as pct_zona
+from por_zona p
+join {{ ref('dim_zone') }} z on p.pu_zone_id = z.zone_id
+cross join total_mes t
+where p.viajes >= 1000
+  and p.pu_zone_id not in (264, 265)
+order by pct_zona desc, p.viajes desc
+limit 5
 ```
 
 ## Pregunta d
@@ -161,30 +170,31 @@ LIMIT 5;
 
 Los viajes con tarifa <= 0 no entran en el promedio (su `propina_pct` es nula, regla R09). Los tipos 3 y 4 casi no tienen propina, lo que es esperable en viajes sin cargo o en disputa.
 
-Consulta: `sql/preguntas/d_propina_por_pago.sql`
+Consulta: `sql/preguntas/pregunta_d_propina_por_pago.sql` (tabla `preguntas.pregunta_d_propina_por_pago`)
 
 ```sql
 -- (d) Propina promedio como porcentaje de la tarifa, por tipo de pago, en los dos meses.
 -- propina_pct es nula cuando la tarifa es <= 0 (regla R09); avg() ignora esos viajes.
-SELECT
+-- El efectivo da 0 % y no es interpretable: la propina en efectivo no queda registrada.
+select
     d.anio_mes,
     f.payment_type,
-    CASE f.payment_type
-        WHEN 0 THEN 'Tarifa flexible'
-        WHEN 1 THEN 'Tarjeta de crédito'
-        WHEN 2 THEN 'Efectivo'
-        WHEN 3 THEN 'Sin cargo'
-        WHEN 4 THEN 'Disputa'
-        WHEN 5 THEN 'Desconocido'
-        WHEN 6 THEN 'Viaje anulado'
-    END AS forma_pago,
-    count(*) AS viajes,
-    round(avg(f.propina_pct), 2) AS propina_promedio_pct
-FROM fact_trips f
-JOIN dim_date d ON f.fecha = d.fecha
-WHERE d.anio_mes IN ('{mes}', '{mes_anterior}')
-GROUP BY d.anio_mes, f.payment_type
-ORDER BY d.anio_mes DESC, f.payment_type;
+    case f.payment_type
+        when 0 then 'Tarifa flexible'
+        when 1 then 'Tarjeta de crédito'
+        when 2 then 'Efectivo'
+        when 3 then 'Sin cargo'
+        when 4 then 'Disputa'
+        when 5 then 'Desconocido'
+        when 6 then 'Viaje anulado'
+    end as forma_pago,
+    count(*) as viajes,
+    round(avg(f.propina_pct)::numeric, 2) as propina_promedio_pct
+from {{ ref('fact_trips') }} f
+join {{ ref('dim_date') }} d on f.fecha = d.fecha
+where d.anio_mes in ('{{ mes_asignado() }}', '{{ mes_anterior() }}')
+group by d.anio_mes, f.payment_type
+order by d.anio_mes desc, f.payment_type
 ```
 
 ## Pregunta e
@@ -200,24 +210,24 @@ ORDER BY d.anio_mes DESC, f.payment_type;
 
 Los aeropuertos se identifican por nombre de zona (`'JFK Airport'` y `'LaGuardia Airport'` en `dim_zone`), como origen o como destino.
 
-Consulta: `sql/preguntas/e_aeropuertos.sql`
+Consulta: `sql/preguntas/pregunta_e_aeropuertos.sql` (tabla `preguntas.pregunta_e_aeropuertos`)
 
 ```sql
 -- (e) Viajes y tarifa media de los que empiezan o terminan en JFK o LaGuardia,
 -- identificados por nombre de zona. Tarifa media sin los viajes con tarifa <= 0 (R09).
-SELECT
+select
     d.anio_mes,
-    count(*) AS viajes,
-    round(avg(f.fare_amount) FILTER (WHERE f.fare_amount > 0), 2) AS tarifa_media
-FROM fact_trips f
-JOIN dim_date d ON f.fecha = d.fecha
-JOIN dim_zone zo ON f.pu_zone_id = zo.zone_id
-JOIN dim_zone zd ON f.do_zone_id = zd.zone_id
-WHERE d.anio_mes IN ('{mes}', '{mes_anterior}')
-  AND (zo.zone IN ('JFK Airport', 'LaGuardia Airport')
-       OR zd.zone IN ('JFK Airport', 'LaGuardia Airport'))
-GROUP BY d.anio_mes
-ORDER BY d.anio_mes DESC;
+    count(*) as viajes,
+    round((avg(f.fare_amount) filter (where f.fare_amount > 0))::numeric, 2) as tarifa_media
+from {{ ref('fact_trips') }} f
+join {{ ref('dim_date') }} d on f.fecha = d.fecha
+join {{ ref('dim_zone') }} zo on f.pu_zone_id = zo.zone_id
+join {{ ref('dim_zone') }} zd on f.do_zone_id = zd.zone_id
+where d.anio_mes in ('{{ mes_asignado() }}', '{{ mes_anterior() }}')
+  and (zo.zone in ('JFK Airport', 'LaGuardia Airport')
+       or zd.zone in ('JFK Airport', 'LaGuardia Airport'))
+group by d.anio_mes
+order by d.anio_mes desc
 ```
 
 ## Pregunta f
@@ -237,29 +247,35 @@ ORDER BY d.anio_mes DESC;
 4. Hipótesis: en 2025 una parte mayor de los viajes se pide y paga por aplicación y se registra con ese tipo de pago.
 5. No podemos confirmarlo con estos datos; habría que comparar más meses o el origen de cada viaje.
 
-Datos del desglose por tipo de pago: `exploracion/explorar_resultados.py`.
+Datos del desglose por tipo de pago: `exploracion/04_resultados.sql`.
 
-Consulta: `sql/preguntas/f_variacion_meses.sql`
+Consulta: `sql/preguntas/pregunta_f_variacion_meses.sql` (tabla `preguntas.pregunta_f_variacion_meses`)
 
 ```sql
--- (f) Variación de viajes totales y de tarifa media entre el mes y el mismo mes del año anterior.
+-- (f) Variación de viajes totales y de tarifa media entre el mes y el mismo mes de 2024.
 -- Tarifa media sin los viajes con tarifa <= 0 (R09).
-WITH por_mes AS (
-    SELECT
+with por_mes as (
+    select
         d.anio_mes,
-        count(*) AS viajes,
-        avg(f.fare_amount) FILTER (WHERE f.fare_amount > 0) AS tarifa_media
-    FROM fact_trips f
-    JOIN dim_date d ON f.fecha = d.fecha
-    GROUP BY d.anio_mes
+        count(*) as viajes,
+        avg(f.fare_amount) filter (where f.fare_amount > 0) as tarifa_media
+    from {{ ref('fact_trips') }} f
+    join {{ ref('dim_date') }} d on f.fecha = d.fecha
+    group by d.anio_mes
 )
-SELECT
-    actual.viajes AS viajes_mes,
-    anterior.viajes AS viajes_mes_anterior,
-    round(100.0 * (actual.viajes - anterior.viajes) / anterior.viajes, 1) AS variacion_viajes_pct,
-    round(actual.tarifa_media, 2) AS tarifa_media_mes,
-    round(anterior.tarifa_media, 2) AS tarifa_media_mes_anterior,
-    round(100.0 * (actual.tarifa_media - anterior.tarifa_media) / anterior.tarifa_media, 1) AS variacion_tarifa_pct
-FROM por_mes actual
-JOIN por_mes anterior ON actual.anio_mes = '{mes}' AND anterior.anio_mes = '{mes_anterior}';
+select
+    actual.viajes as viajes_mes,
+    anterior.viajes as viajes_mes_anterior,
+    round(100.0 * (actual.viajes - anterior.viajes) / anterior.viajes, 1) as variacion_viajes_pct,
+    round(actual.tarifa_media::numeric, 2) as tarifa_media_mes,
+    round(anterior.tarifa_media::numeric, 2) as tarifa_media_mes_anterior,
+    round((100.0 * (actual.tarifa_media - anterior.tarifa_media) / anterior.tarifa_media)::numeric, 1) as variacion_tarifa_pct
+from por_mes actual
+join por_mes anterior
+  on actual.anio_mes = '{{ mes_asignado() }}'
+ and anterior.anio_mes = '{{ mes_anterior() }}'
 ```
+
+## Verificación
+
+Las cifras de este documento son las que devuelve `make respuestas` después de `make all MES=2025-03` (corrida del 23/11/2026). Los conteos de calidad en los que se apoyan coinciden con los de `exploracion/HALLAZGOS.md`, medidos por separado sobre los datos crudos.

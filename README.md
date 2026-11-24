@@ -1,8 +1,10 @@
 # Pipeline NYC Taxi
 
+Pipeline batch que ingiere, valida, limpia y modela los viajes de taxi amarillo de Nueva York de un mes y del mismo mes del año anterior (acá, **marzo 2025 contra marzo 2024**), y responde 6 preguntas de negocio sobre su propio modelo. Usa el stack visto en la materia: **dlt** para la ingesta, **PostgreSQL** como base, **dbt** para calidad, transformación y modelo, **Dagster** para orquestar, y **Prometheus, Grafana y Loki** para observar la base y los procesos, todo en **Docker**.
+
 ## Cómo instalar y ejecutar
 
-Requisitos: Python 3.10 o superior (probado con 3.11), `make` y conexión a internet. Los datos no están en el repositorio: el pipeline los descarga.
+Lo único que hace falta en la máquina es **Docker** (Docker Desktop en Mac y Windows, Docker Engine en Linux) y conexión a internet. Python, dbt, Dagster y el resto corren dentro de los contenedores. Los datos no están en el repositorio: el pipeline los descarga.
 
 ```bash
 git clone https://github.com/Kevin2407/nyc-taxi-pipeline.git
@@ -10,52 +12,137 @@ cd nyc-taxi-pipeline
 make all MES=2025-03
 ```
 
-Ese comando crea el entorno virtual `.venv`, instala `requirements.txt` y corre las cinco etapas para el mes pedido y el mismo mes del año anterior (acá, marzo 2025 y marzo 2024). Al final muestra las respuestas a las seis preguntas.
-
-Si `python3` en la máquina es otra versión, se puede indicar cuál usar para crear el entorno:
+En Windows sin `make`, el equivalente exacto es:
 
 ```bash
-make all MES=2025-03 PYTHON_BASE=python3.11
+docker compose run --rm -e MES=2025-03 pipeline
 ```
 
-Otros comandos:
+Ese comando construye la imagen (la primera vez), levanta Postgres, Dagster y la observabilidad, y corre el job `pipeline_completo` para el mes pedido y el mismo mes del año anterior: ingesta, contrato de esquema, calidad, transformación, Parquet, modelo y preguntas. Termina con código 0 si todo salió bien y distinto de 0 si algo falló.
 
 | Comando | Qué hace |
 | --- | --- |
-| `make test` | Corre los tests automáticos |
-| `make ingesta MES=...` (o `esquema`, `calidad`, `transformacion`, `modelo`) | Corre hasta esa etapa inclusive |
-| `make -n all MES=...` | Muestra los comandos que correría, sin ejecutarlos |
-| `make limpiar-datos` | Borra `data/` para correr desde cero |
+| `make all MES=2025-03` | Comando único: el pipeline completo |
+| `make reporte` | Reporte de calidad por mes y por regla, y filas en cuarentena con su regla violada |
+| `make respuestas` | Las 6 respuestas de negocio |
+| `make test` | Tests automáticos (pytest, contra una base de prueba aparte) |
+| `make levantar` / `make apagar` | Deja prendida o apaga la plataforma |
+| `make ingesta`, `esquema`, `calidad`, `transformacion`, `modelo` | Cada etapa por separado, sin Dagster |
+| `make reprocesar MES=2025-03` | Vuelve a escribir solo la partición Parquet de ese mes |
+| `make explorar` | Consultas de exploración sobre los datos cargados (`exploracion/*.sql`) |
+| `make limpiar` | Borra la base, los volúmenes y `data/` para correr desde cero |
 
-Correr `make all` dos veces deja los mismos conteos: la ingesta no vuelve a descargar y cada etapa reemplaza solo los datos de su mes.
+Mientras la plataforma está prendida:
 
-**Reproducibilidad verificada.** El 17/11/2026 se clonó el repositorio de cero en una segunda máquina (Ubuntu) y se corrieron `make all MES=2025-03` y `make test` sin ningún paso previo. Los resultados fueron idénticos a los de la Mac:
+| Servicio | Dirección |
+| --- | --- |
+| Dagster (grafo, corridas, logs, sensor) | http://localhost:3000 |
+| Grafana (tableros "Postgres - base taxi" y "Pipeline - procesos"; usuario y contraseña `admin`) | http://localhost:3001 |
+| Prometheus · Pushgateway · Alloy | http://localhost:9090 · http://localhost:9091 · http://localhost:12345 |
+| PostgreSQL (por ejemplo, desde DBeaver; base, usuario y contraseña `taxi`) | `localhost:5432` |
 
-| Control | macOS (M2, 8 GB) | Ubuntu |
-| --- | --- | --- |
-| Hash de `yellow_tripdata_2025-03.parquet` | `20c4b77cce45...` | `20c4b77cce45...` |
-| Hash de `yellow_tripdata_2024-03.parquet` | `2d4cdc8fb967...` | `2d4cdc8fb967...` |
-| Cuarentena 2025-03 / 2024-03 | 92.057 / 46.704 | 92.057 / 46.704 |
-| Filas en `fact_trips` | 7.589.124 | 7.589.124 |
-| Respuestas a las 6 preguntas | iguales | iguales |
-| Tests | 4 pasan | 4 pasan |
+### Demostración
+
+1. **Correr el pipeline completo:** `make all MES=2025-03`, con Dagster abierto en *Runs*.
+2. **Volver a correrlo y mostrar que los conteos no cambian:** otra vez `make all MES=2025-03`. La ingesta dice "Sin cambios" (el hash coincide con el del log) y los conteos de `make reporte` son los mismos.
+3. **Reporte de calidad y una fila en cuarentena con su regla violada:** `make reporte`. Por ejemplo, el viaje de 320.136 millas en 7 minutos de marzo 2025 viola R04 (distancia excesiva) y R10 (velocidad imposible).
+
+## Estructura del repositorio
+
+```
+README.md · RESULTADOS.md · DECISIONES.md
+requirements.txt          librerías de Python con versión fija (van dentro de la imagen)
+Makefile                  atajos: make all MES=..., make reporte, make test...
+Dockerfile · docker-compose.yml · .env.example
+contracts/
+  yellow_schema.yaml      contrato de esquema (Parte 2)
+  reglas_calidad.csv      catálogo de reglas: id, severidad, umbral y justificación (Parte 3)
+src/
+  ingesta.py              Parte 1: descarga con hash, reintentos y log; carga a Postgres con dlt
+  esquema.py              Parte 2: compara el archivo contra el contrato antes de cargar
+  calidad.py              Parte 3: reglas, cuarentena, reporte y reconciliación (corre sql/calidad)
+  transformacion.py       Parte 4: capa curada (sql/curado) y Parquet particionado con Polars
+  modelo.py               Parte 5: modelo estrella y preguntas (sql/modelo y sql/preguntas)
+  definitions.py          orquestación con Dagster: job pipeline_completo y sensor
+  metricas.py             métricas de cada etapa para Prometheus y Grafana
+  base.py · correr_dbt.py · meses.py · preparar.py   utilidades
+sql/                      una consulta por archivo (modelos de dbt)
+  staging/  calidad/  curado/  modelo/  preguntas/
+tests/                    tests de pytest; tests/dbt/ tiene los tests de datos de dbt
+macros/                   funciones de Jinja que usan los modelos de dbt
+dbt_project.yml · profiles.yml   configuración de dbt
+dagster/                  configuración de Dagster
+observabilidad/           Prometheus, Grafana (datasources y tableros), Loki y Alloy
+exploracion/              consultas SQL sobre los datos crudos y HALLAZGOS.md, que justifican umbrales y severidades
+```
+
+`data/` no se sube (está en `.gitignore`): ahí el pipeline deja los archivos crudos (`data/raw/`) y la capa curada (`data/curated/`).
 
 ## Arquitectura
 
+```
+TLC (Parquet mensual) ──► 1. INGESTA (dlt) ──────────► raw.yellow_trips, raw.zonas, raw.ingestion_log
+                             descarga a data/raw/yellow/year=AAAA/month=MM/ sin modificar,
+                             hash SHA-256, 3 reintentos, log de control
+                          2. ESQUEMA  (antes de cargar: contrato, snake_case, cbd nulo en 2024) ► raw.reporte_esquema
+                                   │
+                                   ▼  dbt (SQL en sql/, ejecutado dentro de Postgres)
+                          staging.stg_yellow_trips  (los dos meses unificados)
+                          3. CALIDAD ──► calidad.trips_validos (con flags)
+                                      ├─► calidad.cuarentena (fila original + archivo + reglas)
+                                      └─► calidad.reporte_calidad / reporte_calidad_reglas
+                                          test de reconciliación: leídas = aceptadas + cuarentena
+                          4. TRANSFORMACIÓN ──► curado.trips_curados (columnas derivadas y zonas)
+                                             └─► data/curated/yellow/year=AAAA/month=MM/trips.parquet (Polars)
+                          5. MODELO ──► modelo.dim_zone, dim_date, fact_trips, agg_zone_hour
+                                     └─► preguntas.pregunta_a ... pregunta_f
+
+Dagster ordena y ejecuta las etapas (job pipeline_completo) y guarda cada corrida.
+Cada etapa mide con psutil su duración, RAM, CPU y filas ──► Pushgateway ──► Prometheus ──► Grafana
+postgres-exporter mide la base ──► Prometheus ──► Grafana
+Alloy junta los logs de todos los contenedores ──► Loki ──► Grafana
+```
+
+Todos los servicios corren en contenedores dentro de una red de Docker propia (`pipeline_net`) y se hablan por nombre: por ejemplo, dlt y dbt se conectan a `postgres:5432` y Prometheus lee `postgres-exporter:9187` y `pushgateway:9091`.
+
+| Servicio | Qué es | Qué hace |
+| --- | --- | --- |
+| `postgres` | PostgreSQL 17 | La base: esquemas `raw`, `staging`, `calidad`, `curado`, `modelo` y `preguntas`. Techo de 1,5 GB de RAM |
+| `pipeline` | Imagen propia (Python 3.12) | El comando único: corre el job de Dagster y termina |
+| `dagster-webserver`, `dagster-daemon` | Dagster | La web (grafo de assets, corridas, logs) y el daemon que evalúa el sensor `nuevo_mes_publicado` |
+| `preparar` | Imagen propia | Corre una vez al arrancar: crea la base `dagster` y el manifest de dbt |
+| `herramientas` | Imagen propia | Para comandos sueltos: etapas de a una, tests, dbt |
+| `postgres-exporter`, `pushgateway`, `prometheus`, `grafana` | Observabilidad de métricas | Base y procesos en dos tableros |
+| `loki`, `alloy` | Observabilidad de logs | Logs de todos los contenedores, en Grafana |
+
+**Herramientas elegidas.** dlt es el ingestador: el profe propuso dlt o Meltano, y Airbyte quedó descartado porque pide 8 GB de RAM solo para él, se instala aparte con su propio Kubernetes y guarda su configuración fuera del repositorio. dbt hace todo el SQL (calidad, curado, modelo y preguntas) dentro de Postgres. Polars escribe el Parquet en modo streaming para no cargar un mes entero en memoria. Dagster orquesta; un Makefile solo no muestra el grafo, no guarda el historial de corridas ni detecta meses nuevos.
+
+**¿Corre continuamente?** La plataforma sí: Postgres, Dagster y la observabilidad quedan prendidos (`make levantar`). El procesamiento es batch porque el dato lo es: la TLC publica un archivo por mes, con unos dos meses de demora. El sensor `nuevo_mes_publicado` de Dagster se fija cada 6 horas si apareció el mes siguiente al último procesado y, si apareció, lanza el job solo. Arranca apagado, para que levantar el stack no dispare descargas; se prende desde la web de Dagster (*Automation*).
+
 ## Decisiones
 
-El detalle fechado de cada decisión está en `DECISIONES.md`. Acá van las que pide la consigna.
+El detalle fechado de cada decisión, con su porqué, está en `DECISIONES.md`. Acá van las que pide la consigna.
 
-### Esquema
+### Parte 1: ingesta
 
-- **Valor de `cbd_congestion_fee` en 2024: nulo.** El cargo de congestión no existía en 2024. Un 0 afirmaría que se evaluó y no se cobró; el nulo dice que el dato no existe. Además `avg()` ignora los nulos, mientras que un 0 bajaría cualquier promedio. En la tabla unificada, las 3.582.628 filas de marzo 2024 tienen nulo y las 4.145.257 de marzo 2025 tienen valor.
-- **Si aparece una columna que no está en el contrato:** el pipeline la reporta como "nueva", no la carga y sigue. Las columnas conocidas siguen siendo válidas, así que no hay motivo para frenar. Para incorporarla hay que agregarla a `contracts/yellow_schema.yaml` y subir el número de versión, y ese cambio queda registrado en Git.
-- **Si falta una columna obligatoria o cambia un tipo:** el pipeline frena con código de salida distinto de 0 y no carga el archivo.
-- **Si falta una columna opcional** (hoy solo `cbd_congestion_fee`): se reporta y se completa con nulo.
+- `python -m src.ingesta --mes 2025-03` descarga a `data/raw/yellow/year=2025/month=03/yellow_tripdata_2025-03.parquet` sin modificarlo, en bloques de 1 MB a un `.tmp` que se renombra al terminar. La tabla de zonas se descarga una sola vez (misma regla de idempotencia).
+- **Idempotencia:** si el archivo existe y su SHA-256 coincide con el de la última ingesta `ok` del log, no se descarga ni se carga nada. La carga a Postgres usa `merge` con estrategia `delete-insert` por `mes_archivo`: recargar un mes reemplaza solo ese mes.
+- **`raw.ingestion_log`:** archivo, URL, filas, bytes, hash, fecha y hora, estado (`ok` o `error`) y detalle. `ok` se anota recién después de cargar.
+- **Fallas de red:** hasta 3 reintentos con esperas de 2, 4 y 8 segundos; si sigue fallando, fila `error` en el log y código de salida distinto de 0.
 
-### Calidad
+### Parte 2: esquema
 
-Las reglas están en `contracts/reglas_calidad.yaml`, cada una con identificador, descripción, severidad, umbral y justificación. Las mediciones que las respaldan están en `exploracion/HALLAZGOS.md`.
+- **Contrato:** `contracts/yellow_schema.yaml` (versión 2): nombre en snake_case y tipo de Arrow de cada una de las 20 columnas; `cbd_congestion_fee` es opcional. Su historial está en Git.
+- **Antes de cargar**, `src/esquema.py` compara el esquema real del Parquet contra el contrato y reporta columnas faltantes (obligatorias y opcionales), nuevas y con tipo distinto. El resultado de cada archivo queda en `raw.reporte_esquema`.
+- **snake_case:** con la misma regla que usa dlt (`PULocationID` → `pu_location_id`).
+- **Los dos meses se unifican** en `raw.yellow_trips`, con `archivo_origen` y `mes_archivo` en cada fila.
+- **Valor de `cbd_congestion_fee` en 2024: nulo, no 0.** El cargo no existía: un 0 afirmaría que se cobró cero. Además los promedios ignoran los nulos y un 0 los bajaría. Resultado: las 3.582.628 filas de marzo 2024 tienen nulo y las 4.145.257 de marzo 2025 tienen valor.
+- **Si mañana aparece una columna que no está en el contrato:** se reporta como "nueva", no se carga y el pipeline sigue (lo conocido sigue siendo válido). Para incorporarla se agrega al contrato y se sube la versión.
+- **Si falta una columna obligatoria o cambia un tipo:** el archivo no se carga, el log registra `error` y el pipeline termina con error.
+
+### Parte 3: calidad
+
+Las reglas están en `contracts/reglas_calidad.csv` (id, descripción, severidad, umbral y justificación) y sus condiciones SQL en `sql/calidad/trips_evaluados.sql`. Cambiar una severidad es editar una celda del CSV; dbt lo lee antes de armar el SQL. Las mediciones que respaldan los umbrales están en `exploracion/HALLAZGOS.md`.
 
 Criterio de severidad: **rechazo** cuando la fila describe algo imposible o no se puede asignar a un mes o a una zona; **advertencia** cuando un dato es dudoso o falta, pero el viaje existió y se cobró.
 
@@ -67,20 +154,24 @@ Criterio de severidad: **rechazo** cuando la fila describe algo imposible o no s
 | R04 | Distancia excesiva | rechazo | 100 millas | El 99,99 % mide menos de 58; lo que pasa de 100 es error de carga |
 | R05 | Importe total negativo | rechazo | Total >= 0 | Ajustes de disputas y viajes sin cargo, no precios |
 | R06 | Pasajeros nulo o 0 | advertencia | Al menos 1 | Afecta al 13 % y al 22,7 %; no interviene en ningún cálculo |
-| R07 | Zona de origen o destino inexistente | rechazo | Existir en la tabla de zonas | No se puede enriquecer ni modelar |
-| R08 | Duplicado exacto | rechazo | Todas las columnas iguales | Contaría dos veces el mismo viaje; se conserva una copia |
+| R07 | Zona de origen o destino inexistente (o nula) | rechazo | Existir en la tabla de zonas | No se puede enriquecer ni modelar |
+| R08 | Duplicado exacto | rechazo | Las 20 columnas iguales en el mismo archivo | Contaría dos veces el mismo viaje; se conserva una copia |
 | R09 | Tarifa base menor o igual a 0 (propia) | advertencia | Tarifa > 0 | Viajes cobrados con tarifa inservible; se excluyen de los cálculos sobre tarifa |
 | R10 | Velocidad promedio imposible (propia) | rechazo | 80 mph | El 99,9 % promedia menos de 49 mph |
 | R11 | Zona 264 o 265 (propia) | advertencia | Zonas 1 a 263 | Existen en la tabla pero no son un lugar real |
 
+Los umbrales de R04 y R10 son variables de dbt (`dbt_project.yml`).
+
+**Cuarentena y flags:** las filas que violan una regla de rechazo van a `calidad.cuarentena`, con la fila original, el archivo de origen y la lista de reglas violadas (por ejemplo, `R04,R10`). Las advertencias no descartan la fila: quedan en `calidad.trips_validos` con la columna `flags`.
+
 **Tratamiento de nulos**
 
-- `cbd_congestion_fee` es nulo en 2024 (ver Esquema).
+- `cbd_congestion_fee` es nulo en 2024 (ver Parte 2).
 - `passenger_count` nulo no se completa ni se rechaza: se marca con R06.
-- Una condición que da nulo porque le falta un dato se toma como "no viola la regla".
-- La velocidad queda nula cuando la distancia es menor o igual a 0, y la propina como porcentaje de la tarifa queda nula cuando la tarifa es menor o igual a 0.
+- Una condición que da nulo porque le falta un dato cuenta como "no viola la regla", salvo R07: una zona nula no se puede asignar y se rechaza.
+- La velocidad queda nula cuando la distancia es <= 0 (R03), y la propina como porcentaje de la tarifa queda nula cuando la tarifa es <= 0 (R09).
 
-**Resultado de la validación** (salida de `python -m src.calidad --mes AAAA-MM`)
+**Reporte y reconciliación** (`make reporte`):
 
 | | Marzo 2024 | Marzo 2025 |
 | --- | --- | --- |
@@ -88,34 +179,34 @@ Criterio de severidad: **rechazo** cuando la fila describe algo imposible o no s
 | Aceptadas | 3.535.924 | 4.053.200 |
 | En cuarentena | 46.704 (1,30 %) | 92.057 (2,22 %) |
 
-En los dos meses se cumple leídas = aceptadas + cuarentena. Si no se cumpliera, el pipeline termina con código de salida 1.
+La reconciliación es un test de dbt (`tests/dbt/reconciliacion.sql`): devuelve los meses donde leídas ≠ aceptadas + cuarentena. Si devuelve alguno, `dbt build` falla, el paso de Dagster falla y el pipeline termina con error. Cada número se cuenta en una tabla distinta (staging, válidos y cuarentena) para que el control sirva.
 
-### Transformación
+### Parte 4: transformación
 
-Columnas derivadas de la capa curada:
+Columnas derivadas de `curado.trips_curados` (`sql/curado/trips_curados.sql`):
 
 | Columna | Cálculo | Cuándo queda nula |
 | --- | --- | --- |
 | `duracion_min` | segundos entre subida y bajada / 60 | nunca (R02 rechaza duraciones <= 0) |
 | `velocidad_mph` | distancia / duración en horas | distancia <= 0 (R03) |
-| `fecha_subida` | fecha de la subida | nunca |
-| `hora_subida` | hora de la subida, 0 a 23 | nunca |
-| `dia_semana` | día ISO: 1 lunes, 7 domingo | nunca |
+| `fecha_subida`, `hora_subida`, `dia_semana` | fecha, hora 0 a 23 y día ISO (1 lunes, 7 domingo) | nunca |
 | `propina_pct` | propina / tarifa x 100 | tarifa <= 0 (R09) |
 | `pu_borough`, `pu_zone`, `do_borough`, `do_zone` | cruce con la tabla de zonas | nunca (R07 garantiza que la zona existe) |
 
-**Reprocesar un mes reemplaza solo su partición.** Prueba del 17/11/2026: se escribieron los dos meses y después se reprocesó solo marzo 2025.
+La capa curada se escribe además en Parquet particionado estilo Hive, `data/curated/yellow/year=AAAA/month=MM/trips.parquet` (`src/transformacion.py`): Postgres saca el mes con `COPY` y Polars escribe el Parquet en streaming. Se escribe a un `.tmp` y se renombra; después se cuentan sus filas y se comparan con Postgres.
+
+**Reprocesar un mes reemplaza solo su partición.** `make reprocesar MES=2025-03` vuelve a escribir solo la partición de marzo 2025 y muestra las particiones antes y después. Prueba del 23/11/2026 en la Mac (horas UTC del contenedor):
 
 | Partición | Filas antes | Archivo antes | Filas después | Archivo después |
 | --- | --- | --- | --- | --- |
-| `year=2024/month=03` | 3.535.924 | 136.506.067 bytes, 15:37 | 3.535.924 | 136.506.067 bytes, 15:37 (sin tocar) |
-| `year=2025/month=03` | 4.053.200 | 158.539.385 bytes, 15:37 | 4.053.200 | 158.640.007 bytes, 15:39 (reescrito) |
+| `year=2024/month=03` | 3.535.924 | 106.453.144 bytes, 01:27:10 | 3.535.924 | 106.453.144 bytes, 01:27:10 (sin tocar) |
+| `year=2025/month=03` | 4.053.200 | 124.426.701 bytes, 01:26:09 | 4.053.200 | 123.925.467 bytes, 02:11:17 (reescrito) |
 
-Los conteos se obtienen con `python -m src.transformacion --mes AAAA-MM`, que al final cuenta las filas de cada partición leyendo los archivos.
+El tamaño del archivo reescrito cambia un poco porque Postgres no devuelve las filas siempre en el mismo orden y la compresión de Parquet depende del orden; las filas son las mismas.
 
-### Modelo
+### Parte 5: modelo
 
-Modelo estrella en `data/taxi.duckdb`, construido por `src/modelo.py` con los SQL de `sql/modelo/` a partir de la capa curada.
+Modelo estrella en el esquema `modelo` (`sql/modelo/`), construido desde la capa curada:
 
 ```
               dim_date
@@ -133,51 +224,58 @@ Modelo estrella en `data/taxi.duckdb`, construido por `src/modelo.py` con los SQ
 | `dim_date` | un día calendario con al menos un viaje | 62 |
 | `agg_zone_hour` | una zona de origen en una fecha y una hora de subida | 211.405 |
 
-`agg_zone_hour` tiene viajes, ingreso total (`sum(total_amount)`) y duración media en minutos. Las preguntas de negocio están en `sql/preguntas/`, una por archivo, y sus resultados en `RESULTADOS.md`.
+Tests de dbt sobre el modelo: claves únicas en las dimensiones, cada viaje apunta a una fecha y a dos zonas existentes (`relationships`) y la tabla agregada suma los mismos viajes e ingresos que la de hechos. Las preguntas están en `sql/preguntas/`, una por archivo, y sus resultados en `RESULTADOS.md`.
 
 ### Tests
 
-`make test` corre 4 tests con pytest, sobre datos sintéticos y bases temporales: no usan internet ni tocan `data/`.
+`make test` corre 8 tests con pytest. Los que necesitan base usan una base aparte, `taxi_test`, que se crea al empezar y se borra al terminar.
 
 | Test | Qué verifica |
 | --- | --- |
-| `test_calidad.py::test_reglas_de_rechazo_y_advertencia` | Con 4 viajes inventados: total negativo (R05) y duplicado (R08) van a cuarentena; pasajeros en 0 (R06) queda en válidos con el flag `R06`; de un duplicado se conserva una copia |
-| `test_ingesta.py::test_ingesta_es_idempotente` | Con una descarga simulada: la primera corrida descarga y registra; la segunda no descarga ni agrega filas al log; si el archivo se corrompe, vuelve a descargar |
-| `test_reconciliacion.py::test_reconciliacion_detecta_filas_perdidas` | La comparación leídas = aceptadas + cuarentena da falso si falta o sobra una fila |
-| `test_reconciliacion.py::test_reconciliacion_cierra_en_una_corrida` | Con 5 viajes, 2 rotos, el reporte de calidad da 5 leídas, 3 aceptadas y 2 en cuarentena |
+| `test_calidad.py` | **Reglas sobre datos sintéticos:** con 8 viajes inventados, R01, R04+R10, R05, R07 (zona 999 y zona nula) y R08 van a cuarentena con su regla; R06 queda en válidos con el flag; el reporte da 8 = 2 + 6 |
+| `test_ingesta.py` | **Idempotencia:** la segunda corrida no descarga ni agrega filas; si el archivo se corrompe, lo vuelve a bajar y reemplaza el mes sin duplicar. **Reintentos:** ante una falla de red, 3 reintentos y fila `error` en el log |
+| `test_reconciliacion.py` | **Reconciliación:** pasa con los datos correctos y falla si se pierde una fila aceptada |
+| `test_esquema.py` | Columna opcional faltante (nula), columna nueva (se reporta y no se carga), tipo distinto y obligatoria faltante (frenan) |
+| `test_meses.py` | Cálculo del mes anterior y siguiente |
 
-Comprobamos que los tests detectan errores: al cambiar R05 a advertencia en `contracts/reglas_calidad.yaml`, `test_reglas_de_rechazo_y_advertencia` falla.
+Además, cada corrida del pipeline ejecuta los 26 tests de datos de dbt (claves, nulos, valores aceptados, relaciones, reconciliación, que la capa curada no pierda filas y que la agregada cuadre).
+
+## Observabilidad
+
+- **Tablero "Postgres - base taxi":** conexiones, filas leídas y escritas por segundo, bloques desde memoria o disco, archivos temporales, transacciones y tamaño de la base (postgres-exporter). Al pie, los logs de Postgres: consultas de más de 1 segundo y checkpoints.
+- **Tablero "Pipeline - procesos":** por etapa y mes, si terminó bien, cuánto tardó, pico de RAM, CPU y filas; los modelos de dbt más lentos; la duración de cada etapa a lo largo de las corridas. Lo publica `src/metricas.py` (psutil + Pushgateway). Al pie, los logs del pipeline y de Dagster.
+- **Dagster:** cada corrida con sus pasos, duración, logs y el resultado de cada test de dbt.
+
+Ejemplo de uso: el tablero de procesos mostró que la exportación tardaba 2,8 minutos en la Mac contra 23 segundos en Linux; la causa era escribir el CSV temporal en la carpeta compartida con la máquina. Lo movimos al disco del contenedor y la siguiente corrida bajó a 1,8 minutos.
 
 ## Limitaciones conocidas
 
-- La ingesta reintenta ante cualquier error de descarga, también los que no se arreglan reintentando. Un mes que todavía no está publicado devuelve `403 Forbidden` (probado con `2031-01`) y el script espera 14 segundos en total antes de registrar el error.
-- El `ingestion_log` vive en `data/taxi.duckdb`. Si se borra la carpeta `data/`, se pierde el historial y la siguiente corrida descarga todo de nuevo.
-- La tabla `yellow_trips` se crea con las columnas del contrato la primera vez. Si el contrato cambia, hay que borrar `data/taxi.duckdb` y volver a correr el pipeline.
-- La detección de duplicados compara todas las columnas de todas las filas del mes. Es el paso que más memoria usa del pipeline.
-- Reprocesar un mes da las mismas filas, pero el archivo Parquet puede variar unos bytes, porque el orden de las filas no está fijado y eso cambia la compresión. Ordenar al escribir lo haría idéntico a costa de más tiempo y memoria.
+- **Mac de 8 GB:** con todo el stack prendido, la memoria queda justa y el tiempo de dbt varía entre corridas (de 8,4 a 12 minutos medido) según lo que esté usando la máquina. Conviene darle a Docker Desktop entre 5 y 6 GB.
+- **La primera ejecución** descarga las imágenes de Docker (varios GB) e instala las librerías: tarda bastante más que las siguientes.
+- **dbt reconstruye todas las tablas en cada corrida** (no es incremental). Con dos meses son unos minutos; con muchos meses convendría materializar por mes.
+- **La ingesta reintenta ante cualquier error de descarga,** también los que no se arreglan reintentando: un mes que todavía no está publicado devuelve `403` y espera 14 segundos en total antes de registrar el error.
+- **Las tablas de calidad y del modelo guardan copias de los datos** (unos 8 a 9 GB de disco para los dos meses, entre Postgres y Parquet).
+- **`R02` se multiplicó por 20 entre 2024 y 2025** (1.128 contra 22.280 filas). Casi todas son pagos con tarjeta con la misma hora exacta de subida y bajada; no sabemos la causa.
+- **Windows:** Alloy lee los logs por el socket de Docker (`/var/run/docker.sock`), que Docker Desktop ofrece en esa ruta. Clonar el repo dentro de WSL evita la lentitud de las carpetas compartidas.
 
 ## Tiempo de ejecución y pico de RAM
 
-Medido el 17/11/2026 en una MacBook Air M2 con 8 GB de RAM, desde cero (sin `data/`, así que incluye las descargas):
+Medido el 23/11/2026 en una MacBook Air M2 con 8 GB de RAM, con el pipeline completo orquestado por Dagster (`make all MES=2025-03`) y los datos ya descargados. Los números salen del tablero "Pipeline - procesos" y del log de Dagster. La corrida completa tardó **15 min 26 s** de punta a punta.
 
-```bash
-make limpiar-datos
-/usr/bin/time -l make all MES=2025-03
-```
+| Etapa | Duración | Pico de RAM del proceso | CPU |
+| --- | --- | --- | --- |
+| Ingesta sin cambios (por mes) | 0,4 a 2,7 s | 345 a 353 MB | menos de 1 s |
+| Ingesta, primera carga (por mes) | 79 a 83 s | — | — |
+| dbt: staging, calidad, curado, modelo, preguntas y 26 tests | 12 min (8,4 a 12 min según la corrida) | 550 MB (más Postgres, con techo de 1,5 GB) | 83 s |
+| Exportación a Parquet (por mes) | 55 s (2024-03) y 100 s (2025-03) | 711 a 721 MB | 52 a 143 s |
 
-| Medida | Valor |
-| --- | --- |
-| Tiempo total (`real`) | 20,3 segundos |
-| Tiempo de CPU (`user` + `sys`) | 45,6 segundos |
-| Pico de RAM (`maximum resident set size`) | 1.289.863.168 bytes (1,29 GB) |
+dbt es lo que más tarda: reconstruye en cada corrida las tablas de los dos meses (unos 7,7 millones de filas) y su tiempo depende de cuánta memoria le queda libre a Postgres en la máquina. Polars corre con 2 hilos (`POLARS_MAX_THREADS`): con un hilo por núcleo, en la Mac la exportación llegaba a 1,2 GB y competía con Postgres.
 
-El tiempo de CPU es mayor que el total porque DuckDB reparte el trabajo entre varios núcleos. El pico de RAM es el del proceso que más memoria usó, y queda en un sexto de los 8 GB disponibles. Las decisiones que lo mantienen bajo: DuckDB lee los Parquet desde el disco sin cargarlos enteros, la descarga y el hash se hacen en bloques de 1 MB, y cada etapa procesa un mes por vez.
-
-El tiempo depende sobre todo de la velocidad de la conexión, porque las descargas suman unos 130 MB.
+Postgres tiene un techo de 1,5 GB y el resto de los contenedores, techos que suman menos de 3 GB más.
 
 ## Declaración de uso de IA
 
 | Herramienta | Para qué se usó |
 | --- | --- |
 | GitHub Copilot | Generar la estructura inicial de carpetas y archivos vacíos (PR #1) |
-| Claude | Guía paso a paso y explicación de conceptos y herramientas. Propuesta del código Python de `src/`, que escribimos, ejecutamos y probamos nosotros. Redacción de `exploracion/HALLAZGOS.md`, `DECISIONES.md`, `RESULTADOS.md` y las secciones de decisiones de este README a partir de nuestras corridas. Escribió los scripts `exploracion/explorar_umbrales.py` y `exploracion/explorar_resultados.py`, los SQL de `sql/modelo/` y `sql/preguntas/`, el `Makefile` y el diseño de los tests de `tests/` |
+| Claude | Guía paso a paso y explicación de conceptos y herramientas. Escribió la mayor parte del código y la configuración (docker-compose, Dockerfile, módulos de `src/`, SQL de dbt, tests y tableros de Grafana) a partir de nuestras decisiones, y redactó `DECISIONES.md`, `RESULTADOS.md` y este README a partir de nuestras corridas. Nosotros lo ejecutamos, lo revisamos y lo probamos en nuestras máquinas |

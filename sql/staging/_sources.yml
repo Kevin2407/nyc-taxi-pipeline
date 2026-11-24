@@ -1,0 +1,13 @@
+version: 2
+
+# Lo que cargó dlt (src/ingesta.py). dbt no escribe en raw: solo lee.
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: yellow_trips
+        description: Viajes tal como vienen del Parquet, ya ajustados al contrato de esquema.
+      - name: zonas
+        description: Tabla de zonas de la TLC (taxi_zone_lookup.csv).
+      - name: ingestion_log
+        description: Registro de cada descarga y carga.

@@ -1,0 +1,5 @@
+# Dónde está el código que Dagster tiene que cargar: el módulo src/definitions.py.
+load_from:
+  - python_module:
+      module_name: src.definitions
+      working_directory: /app

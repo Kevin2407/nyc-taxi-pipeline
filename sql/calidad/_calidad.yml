@@ -1,0 +1,32 @@
+version: 2
+
+seeds:
+  - name: reglas_calidad
+    description: >
+      Catálogo de reglas de calidad: id, descripción, severidad, umbral y justificación.
+      La condición SQL de cada regla está en models/calidad/trips_evaluados.sql.
+    columns:
+      - name: id
+        data_tests: [unique, not_null]
+      - name: severidad
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['rechazo', 'advertencia']
+
+models:
+  - name: trips_evaluados
+    description: Todas las filas de staging con las reglas que viola cada una (reglas_violadas y flags).
+  - name: trips_validos
+    description: Filas aceptadas (sin reglas de rechazo violadas). Una fila por viaje válido.
+  - name: cuarentena
+    description: Filas rechazadas, con su archivo de origen y las reglas violadas.
+    columns:
+      - name: reglas_violadas
+        data_tests: [not_null]
+      - name: archivo_origen
+        data_tests: [not_null]
+  - name: reporte_calidad
+    description: Por mes, filas leídas, aceptadas y en cuarentena.
+  - name: reporte_calidad_reglas
+    description: Por mes y por regla, cuántas filas la violan.

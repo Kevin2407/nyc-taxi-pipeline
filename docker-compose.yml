@@ -1,0 +1,253 @@
+# Pipeline NYC Taxi - stack de clase.
+#
+# Comando único (levanta todo lo necesario y corre el pipeline para MES y el mismo mes de 2024):
+#   make all MES=2025-03                                    (Mac y Linux)
+#   docker compose run --rm -e MES=2025-03 pipeline         (lo mismo, en cualquier sistema)
+#
+# Dejar la plataforma prendida (Dagster, Grafana, Prometheus, Postgres):
+#   docker compose up -d
+#   docker compose ps                 (estado de cada servicio)
+#   docker compose logs -f postgres   (logs de un servicio)
+#   docker compose down               (apaga todo; los datos quedan en los volúmenes)
+#
+# Web:  Dagster http://localhost:3000 · Grafana http://localhost:3001 (admin/admin)
+#       Prometheus http://localhost:9090 · Pushgateway http://localhost:9091 · Alloy http://localhost:12345
+#       Postgres localhost:5432
+#
+# Todas las variables tienen un valor por defecto, así que no hace falta un .env
+# para correrlo. Para cambiarlas, copiar .env.example a .env y editarlo.
+
+name: nyc-taxi
+
+# Configuración común de los servicios que corren código nuestro (ver sección Pipeline).
+x-pipeline: &pipeline
+  build: .
+  image: nyc-taxi-pipeline:local
+  environment:
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_USER: ${POSTGRES_USER:-taxi}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
+    POSTGRES_DB: ${POSTGRES_DB:-taxi}
+    # dlt lee de acá a qué base cargar (formato DESTINATION__<destino>__CREDENTIALS)
+    DESTINATION__POSTGRES__CREDENTIALS: postgresql://${POSTGRES_USER:-taxi}:${POSTGRES_PASSWORD:-taxi}@postgres:5432/${POSTGRES_DB:-taxi}
+    # El merge de dlt carga primero a raw_staging y después pasa los datos a raw.
+    # Con esto vacía raw_staging al terminar, para no guardar dos copias del mes.
+    LOAD__TRUNCATE_STAGING_DATASET: "true"
+    # Polars usa por defecto un hilo por núcleo: en una Mac de 8 núcleos eso subía la RAM de
+    # la exportación a 1,2 GB y competía con Postgres. Con 2 hilos queda como en Linux.
+    POLARS_MAX_THREADS: "2"
+    # dbt busca acá el proyecto y la conexión (dbt_project.yml y profiles.yml, en la raíz del repo)
+    DBT_PROJECT_DIR: /app
+    DBT_PROFILES_DIR: /app
+    DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+    # Dagster guarda su configuración (dagster.yaml) en esta carpeta
+    DAGSTER_HOME: /opt/dagster/home
+    PUSHGATEWAY_URL: http://pushgateway:9091
+    MES: ${MES:-2025-03}
+  volumes:
+    - ./:/app                                              # el código de la máquina, en vivo
+    - dagster_home:/opt/dagster/home                       # datos locales de Dagster
+    - ./dagster/dagster.yaml:/opt/dagster/home/dagster.yaml:ro
+  networks:
+    - pipeline_net
+  mem_limit: 2g
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-taxi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
+      POSTGRES_DB: ${POSTGRES_DB:-taxi}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"   # para DBeaver desde la máquina: localhost:5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - pipeline_net
+    shm_size: 256mb
+    mem_limit: 1536m                    # techo de RAM del contenedor (máquina de 8 GB)
+    command:
+      - postgres
+      # Memoria: pensada para que Postgres use como mucho ~1,5 GB.
+      - -c
+      - shared_buffers=384MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - effective_cache_size=1GB
+      # Escritura: cargas grandes sin frenar en checkpoints.
+      - -c
+      - max_wal_size=2GB
+      # Logs a la salida estándar del contenedor, para verlos con docker logs / Loki.
+      - -c
+      - log_min_duration_statement=1000   # toda consulta de más de 1 s queda en el log
+      - -c
+      - log_checkpoints=on
+      - -c
+      - log_connections=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taxi} -d ${POSTGRES_DB:-taxi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------- Observabilidad ----------
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      # "postgres" es el nombre del servicio: lo resuelve el DNS interno de la red
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-taxi}:${POSTGRES_PASSWORD:-taxi}@postgres:5432/${POSTGRES_DB:-taxi}?sslmode=disable"
+    networks:
+      - pipeline_net
+    mem_limit: 64m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pushgateway:
+    image: prom/pushgateway:v1.11.1
+    ports:
+      - "9091:9091"                     # http://localhost:9091 muestra lo que dejaron los pasos
+    networks:
+      - pipeline_net
+    mem_limit: 64m
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./observabilidad/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"                     # http://localhost:9090
+    networks:
+      - pipeline_net
+    mem_limit: 512m
+    depends_on:
+      - postgres-exporter
+      - pushgateway
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./observabilidad/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observabilidad/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3001:3000"                     # http://localhost:3001 (el 3000 queda para Dagster)
+    networks:
+      - pipeline_net
+    mem_limit: 256m
+    depends_on:
+      - prometheus
+
+  # Loki: guarda los logs de todos los contenedores; se buscan desde Grafana (datasource Loki).
+  loki:
+    image: grafana/loki:3.7.4
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observabilidad/loki.yaml:/etc/loki/loki.yaml:ro
+      - lokidata:/loki
+    networks:
+      - pipeline_net
+    mem_limit: 512m
+
+  # Alloy: lee los logs de los contenedores de este proyecto (por el socket de Docker)
+  # y se los manda a Loki, con la etiqueta "servicio".
+  alloy:
+    image: grafana/alloy:v1.21.0
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./observabilidad/alloy.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "12345:12345"                   # http://localhost:12345 muestra el estado de Alloy
+    networks:
+      - pipeline_net
+    mem_limit: 256m
+    depends_on:
+      - loki
+
+  # ---------- Pipeline ----------
+  # Todos los servicios de esta sección usan la misma imagen (Dockerfile) y la
+  # misma configuración, definida una sola vez en "x-pipeline" al principio del archivo.
+
+  # Caja de herramientas para comandos sueltos mientras desarrollamos. No arranca con "up".
+  #   docker compose run --rm herramientas dbt --version
+  herramientas:
+    <<: *pipeline
+    profiles: ["herramientas"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Corre una vez al levantar el stack y termina: crea la base "dagster" y el manifest de dbt.
+  preparar:
+    <<: *pipeline
+    command: ["python", "-m", "src.preparar"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Web de Dagster: grafo de assets, corridas, logs, sensor. http://localhost:3000
+  dagster-webserver:
+    <<: *pipeline
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster/workspace.yaml"]
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      preparar:
+        condition: service_completed_successfully
+
+  # Daemon de Dagster: queda prendido y evalúa el sensor nuevo_mes_publicado.
+  dagster-daemon:
+    <<: *pipeline
+    command: ["dagster-daemon", "run", "-w", "/app/dagster/workspace.yaml"]
+    restart: unless-stopped
+    depends_on:
+      preparar:
+        condition: service_completed_successfully
+
+  # EL COMANDO ÚNICO. Levanta todo lo que hace falta y corre el job pipeline_completo
+  # para el mes de MES y el mismo mes del año anterior; termina cuando el pipeline termina.
+  #   docker compose run --rm pipeline
+  #   docker compose run --rm -e MES=2025-04 pipeline      (otro mes)
+  # La corrida queda registrada en Dagster y se ve en http://localhost:3000.
+  pipeline:
+    <<: *pipeline
+    profiles: ["ejecucion"]
+    command: ["dagster", "job", "execute", "-m", "src.definitions", "-j", "pipeline_completo"]
+    depends_on:
+      preparar:
+        condition: service_completed_successfully
+      dagster-webserver:
+        condition: service_started
+      dagster-daemon:
+        condition: service_started
+      grafana:
+        condition: service_started
+      alloy:
+        condition: service_started
+
+volumes:
+  pgdata:
+  promdata:
+  grafanadata:
+  dagster_home:
+  lokidata:
+
+networks:
+  pipeline_net:
+    driver: bridge

@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: dim_zone
+    description: Una fila por zona de taxi de la TLC.
+    columns:
+      - name: zone_id
+        data_tests: [unique, not_null]
+
+  - name: dim_date
+    description: Una fila por día calendario con al menos un viaje.
+    columns:
+      - name: fecha
+        data_tests: [unique, not_null]
+
+  - name: fact_trips
+    description: Una fila por viaje aceptado por las reglas de calidad.
+    columns:
+      - name: fecha
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: fecha
+      - name: pu_zone_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_zone')
+                field: zone_id
+      - name: do_zone_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_zone')
+                field: zone_id
+
+  - name: agg_zone_hour
+    description: Una fila por zona de origen, fecha y hora de subida, con viajes, ingreso total y duración media.

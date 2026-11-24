@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: stg_yellow_trips
+    description: Una fila por cada fila de los archivos cargados, con las columnas del contrato.
+    columns:
+      - name: mes_archivo
+        data_tests: [not_null]
+      - name: archivo_origen
+        data_tests: [not_null]
+
+  - name: stg_zonas
+    description: Una fila por zona de taxi.
+    columns:
+      - name: location_id
+        data_tests: [unique, not_null]

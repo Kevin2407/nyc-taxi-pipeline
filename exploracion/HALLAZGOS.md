@@ -1,28 +1,31 @@
 # Hallazgos de la exploración
 
-Mediciones hechas el 16/11/2026 sobre los archivos crudos, antes de escribir el pipeline.
-Cada número sale de un script de esta carpeta, que se ejecuta desde la raíz del repo
-(por ejemplo `python exploracion/explorar_calidad.py`). El pipeline no usa estos scripts.
+Mediciones sobre los datos crudos de los dos meses, hechas antes de decidir las reglas de calidad,
+sus severidades y sus umbrales. Cada número sale de una consulta de esta carpeta, que corre sobre
+las tablas que deja la ingesta (`raw.yellow_trips` y `raw.zonas`) o sobre el modelo (`04_resultados.sql`).
+No forman parte del pipeline. Para correrlas todas, con los datos ya cargados:
+
+```bash
+make explorar
+```
+
+También se pueden abrir y ejecutar una por una desde DBeaver.
 
 Archivos: `yellow_tripdata_2024-03.parquet` (57 MB) y `yellow_tripdata_2025-03.parquet` (67 MB).
-Entorno: Python 3.11.16, DuckDB 2.0.0.
 
-## 1. Esquema (`explorar.py`)
+## 1. Esquema (`python -m src.esquema --mes AAAA-MM`, o `make esquema`)
 
 | | Marzo 2024 | Marzo 2025 |
 | --- | --- | --- |
 | Filas | 3.582.628 | 4.145.257 |
 | Columnas reales | 19 | 20 |
 
-- La única diferencia de esquema es `cbd_congestion_fee` (DOUBLE), que está en 2025 y no en 2024.
+- La única diferencia de esquema es `cbd_congestion_fee` (double), que está en 2025 y no en 2024.
 - Las 19 columnas compartidas tienen el mismo nombre y el mismo tipo en los dos archivos.
 - Los nombres vienen con mayúsculas mezcladas (`VendorID`, `RatecodeID`, `PULocationID`,
   `DOLocationID`, `Airport_fee`): hay que normalizarlos a snake_case.
-- Si se lee el archivo desde una carpeta `year=AAAA/month=MM` sin aclarar nada, DuckDB agrega
-  dos columnas `year` (BIGINT) y `month` (VARCHAR) sacadas del nombre de la carpeta. No están
-  en el archivo. Para ver el esquema real hay que leer con `hive_partitioning = false`.
 
-## 2. Reglas obligatorias (`explorar_calidad.py`)
+## 2. Reglas obligatorias (`01_calidad.sql`)
 
 | Regla | Marzo 2024 | % | Marzo 2025 | % |
 | --- | --- | --- | --- | --- |
@@ -33,7 +36,7 @@ Entorno: Python 3.11.16, DuckDB 2.0.0.
 | Pasajeros nulo o 0 | 466.562 | 13,02 | 939.378 | 22,66 |
 | Zona de origen inexistente | 0 | 0,00 | 0 | 0,00 |
 | Zona de destino inexistente | 0 | 0,00 | 0 | 0,00 |
-| Duplicados exactos (`explorar_duplicados.py`) | 0 | 0,00 | 0 | 0,00 |
+| Duplicados exactos | 0 | 0,00 | 0 | 0,00 |
 
 Una misma fila puede violar más de una regla, así que los porcentajes no se suman.
 
@@ -50,7 +53,7 @@ Observaciones:
   264 (`Unknown`) y 265 (`Outside of NYC`). "Existe en la tabla" no es lo mismo que
   "ubicación conocida".
 
-## 3. Suciedad por tipo de pago (`explorar_pagos.py`)
+## 3. Suciedad por tipo de pago (`02_pagos.sql`)
 
 Códigos de `payment_type` según el diccionario de datos: 0 tarifa flexible, 1 tarjeta,
 2 efectivo, 3 sin cargo, 4 disputa.
@@ -73,7 +76,7 @@ Observaciones:
   del tipo 4 y cerca del 30 % del tipo 3, en los dos años. Con tarjeta casi no existen
   (35 y 25 filas). Son ajustes contables, no viajes con un precio real.
 
-## 4. Para la pregunta (f): de dónde sale el crecimiento
+## 4. Para la pregunta (f): de dónde sale el crecimiento (`02_pagos.sql`)
 
 | | Marzo 2024 | Marzo 2025 | Diferencia |
 | --- | --- | --- | --- |
@@ -88,7 +91,7 @@ de taxis, sino más viajes de un tipo que en 2024 se registraba menos.
 Estos números son sobre datos crudos. Los definitivos de `RESULTADOS.md` salen del modelo,
 después de aplicar las reglas de calidad.
 
-## 5. Umbrales y reglas propias (`explorar_umbrales.py`)
+## 5. Umbrales y reglas propias (`03_umbrales.sql`)
 
 **Distancia (millas)**
 
@@ -152,7 +155,7 @@ de 2024 (1.128 filas).
 
 ## 6. Reglas decididas
 
-Están definidas, con su justificación, en `contracts/reglas_calidad.yaml`.
+Están definidas, con su severidad, umbral y justificación, en `contracts/reglas_calidad.csv`.
 
 | Id | Regla | Severidad | 2024-03 | 2025-03 |
 | --- | --- | --- | --- | --- |
@@ -177,5 +180,4 @@ Resultado esperado al aplicarlas (una fila puede violar varias reglas):
 | Aceptadas | 3.535.924 | 4.053.200 |
 | Aceptadas con algún flag | 529.328 | 997.980 |
 
-Estos números son la referencia para comprobar `src/calidad.py`: el reporte de calidad del
-pipeline tiene que dar lo mismo.
+El reporte de calidad del pipeline (`make reporte`) da exactamente estos números.
