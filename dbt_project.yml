@@ -2,6 +2,12 @@
 # dbt no procesa datos por su cuenta: arma el SQL de cada modelo y se lo manda a
 # Postgres en el orden que surge de los ref() entre modelos.
 #
+# Dónde está cada cosa (respetando la estructura de la consigna):
+#   sql/        un archivo SQL por modelo: staging, calidad, curado, modelo y preguntas
+#   contracts/  reglas_calidad.csv (seed: severidad, umbral y justificación de cada regla)
+#   tests/dbt/  tests de datos de dbt (reconciliación y otros)
+#   macros/     funciones de Jinja que usan los modelos
+#
 # Uso (desde el contenedor):  dbt build      (seeds, modelos y tests, en orden)
 
 name: taxi
@@ -9,10 +15,12 @@ version: "2.0.0"
 config-version: 2
 profile: taxi
 
-model-paths: ["models"]
-seed-paths: ["seeds"]
-test-paths: ["tests"]
+model-paths: ["sql"]
+seed-paths: ["contracts"]
+test-paths: ["tests/dbt"]
 macro-paths: ["macros"]
+analysis-paths: []
+snapshot-paths: []
 
 # Umbrales de las reglas de calidad. Cambiar un número acá cambia la regla, sin tocar SQL.
 vars:
@@ -32,8 +40,8 @@ models:
     curado:
       +schema: curado           # viajes válidos con columnas derivadas y zonas
       +materialized: table
-    marts:
-      +schema: marts            # modelo estrella y tabla agregada
+    modelo:
+      +schema: modelo           # modelo estrella y tabla agregada
       +materialized: table
     preguntas:
       +schema: preguntas        # una tabla por pregunta de negocio

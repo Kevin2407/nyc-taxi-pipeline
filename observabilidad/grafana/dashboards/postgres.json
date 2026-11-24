@@ -363,8 +363,8 @@
     {
       "id": 11,
       "type": "logs",
-      "title": "Logs de Postgres",
-      "description": "Consultas de más de 1 s, conexiones y checkpoints (configurado en el docker-compose).",
+      "title": "Logs de Postgres (sin las líneas de conexión)",
+      "description": "Consultas de más de 1 s y checkpoints. Se ocultan las líneas de conexión: Dagster se conecta cada pocos segundos y las taparían. Para verlas, sacar el filtro != \"connection \".",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -382,7 +382,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{servicio=\"postgres\"}"
+          "expr": "{servicio=\"postgres\"} != \"connection \""
         }
       ],
       "options": {

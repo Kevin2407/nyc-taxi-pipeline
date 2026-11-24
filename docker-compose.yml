@@ -1,8 +1,8 @@
 # Pipeline NYC Taxi - stack de clase.
 #
 # Comando único (levanta todo lo necesario y corre el pipeline para MES y el mismo mes de 2024):
-#   docker compose run --rm pipeline
-#   docker compose run --rm -e MES=2025-04 pipeline        (otro mes)
+#   make all MES=2025-03                                    (Mac y Linux)
+#   docker compose run --rm -e MES=2025-03 pipeline         (lo mismo, en cualquier sistema)
 #
 # Dejar la plataforma prendida (Dagster, Grafana, Prometheus, Postgres):
 #   docker compose up -d
@@ -34,9 +34,9 @@ x-pipeline: &pipeline
     # El merge de dlt carga primero a raw_staging y después pasa los datos a raw.
     # Con esto vacía raw_staging al terminar, para no guardar dos copias del mes.
     LOAD__TRUNCATE_STAGING_DATASET: "true"
-    # dbt busca acá el proyecto y la conexión (dbt/dbt_project.yml y dbt/profiles.yml)
-    DBT_PROJECT_DIR: /app/dbt
-    DBT_PROFILES_DIR: /app/dbt
+    # dbt busca acá el proyecto y la conexión (dbt_project.yml y profiles.yml, en la raíz del repo)
+    DBT_PROJECT_DIR: /app
+    DBT_PROFILES_DIR: /app
     DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
     # Dagster guarda su configuración (dagster.yaml) en esta carpeta
     DAGSTER_HOME: /opt/dagster/home
@@ -191,7 +191,7 @@ services:
   # Corre una vez al levantar el stack y termina: crea la base "dagster" y el manifest de dbt.
   preparar:
     <<: *pipeline
-    command: ["python", "-m", "pipeline.preparar"]
+    command: ["python", "-m", "src.preparar"]
     restart: "no"
     depends_on:
       postgres:
@@ -225,7 +225,7 @@ services:
   pipeline:
     <<: *pipeline
     profiles: ["ejecucion"]
-    command: ["dagster", "job", "execute", "-m", "pipeline.definitions", "-j", "pipeline_completo"]
+    command: ["dagster", "job", "execute", "-m", "src.definitions", "-j", "pipeline_completo"]
     depends_on:
       preparar:
         condition: service_completed_successfully

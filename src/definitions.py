@@ -16,15 +16,13 @@ import dagster as dg
 import requests
 from dagster_dbt import DagsterDbtTranslator, DbtCliResource, DbtProject, dbt_assets, get_asset_key_for_model
 
-import pyarrow.parquet as pq
-
-from pipeline import exportar, ingesta, metricas
-from pipeline.meses import es_mes_valido, mes_anterior, mes_siguiente
+from src import ingesta, metricas, transformacion
+from src.meses import es_mes_valido, mes_anterior, mes_siguiente
 
 MES_POR_DEFECTO = os.environ.get("MES", "2025-03")
-DIRECTORIO_DBT = Path(__file__).resolve().parent.parent / "dbt"
+DIRECTORIO_DBT = Path(__file__).resolve().parent.parent  # dbt_project.yml está en la raíz del repo
 
-# El proyecto dbt. Dagster lee su manifest (dbt/target/manifest.json, lo genera "dbt parse")
+# El proyecto dbt. Dagster lee su manifest (target/manifest.json, lo genera "dbt parse")
 # y crea un asset por cada modelo, seed y test.
 proyecto_dbt = DbtProject(project_dir=DIRECTORIO_DBT)
 
@@ -51,7 +49,7 @@ def meses_de_la_corrida(mes):
     group_name="ingesta",
 )
 def ingesta_dlt(context: dg.AssetExecutionContext, config: ConfigMes):
-    """Descarga y carga el mes asignado y el del año anterior (pipeline/ingesta.py)."""
+    """Descarga y carga el mes asignado y el del año anterior (src/ingesta.py)."""
     for mes in meses_de_la_corrida(config.mes):
         context.log.info(f"Ingesta de {mes}")
         with metricas.medir("ingesta", mes, context.log.info) as medicion:
@@ -66,7 +64,7 @@ def ingesta_dlt(context: dg.AssetExecutionContext, config: ConfigMes):
 # ---------- Pasos 2 a 5: dbt ----------
 
 class TraductorDbt(DagsterDbtTranslator):
-    """Agrupa cada modelo de dbt según su carpeta (staging, calidad, curado, marts, preguntas),
+    """Agrupa cada modelo de dbt según su carpeta (staging, calidad, curado, modelo, preguntas),
     así el grafo de Dagster muestra las etapas del pipeline. El seed de reglas va con calidad."""
 
     def get_group_name(self, dbt_resource_props):
@@ -93,15 +91,15 @@ def modelos_dbt(context: dg.AssetExecutionContext, dbt: DbtCliResource, config: 
 @dg.asset(
     deps=[get_asset_key_for_model([modelos_dbt], "trips_curados")],
     group_name="curado",
-    description="data/curated/yellow/year=AAAA/month=MM/trips.parquet (pipeline/exportar.py).",
+    description="data/curated/yellow/year=AAAA/month=MM/trips.parquet (src/transformacion.py, con Polars).",
 )
 def capa_curada_parquet(context: dg.AssetExecutionContext, config: ConfigMes):
     for mes in meses_de_la_corrida(config.mes):
         context.log.info(f"Exportación de {mes}")
         with metricas.medir("exportacion", mes, context.log.info) as medicion:
-            if not exportar.exportar_mes(mes):
+            if not transformacion.exportar_mes(mes):
                 raise dg.Failure(f"Falló la exportación de {mes}.")
-            medicion.filas = pq.ParquetFile(exportar.ruta_particion(mes)).metadata.num_rows
+            medicion.filas = transformacion.filas_de_la_particion(transformacion.ruta_particion(mes))
 
 
 # ---------- Job y sensor ----------

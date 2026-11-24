@@ -10,3 +10,5 @@ venv/
 *.duckdb
 *.duckdb.wal
 .env
+target/
+logs/

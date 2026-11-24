@@ -1,15 +1,30 @@
-"""Etapa de esquema del pipeline."""
-import argparse
-import re
-import sys
+"""Parte 2 de la consigna: contrato de esquema.
+
+Antes de cargar un archivo, compara su esquema real contra contracts/yellow_schema.yaml
+y reporta columnas faltantes, nuevas y con tipo distinto. Después, durante la carga,
+deja cada lote con exactamente las columnas del contrato, en snake_case y en su orden.
+"""
+from datetime import datetime
 from pathlib import Path
 
-import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 import yaml
-
-from src.ingesta import RUTA_DB, armar_rutas
+from dlt.common.normalizers.naming.snake_case import NamingConvention
 
 RUTA_CONTRATO = Path("contracts/yellow_schema.yaml")
+NOMBRES_DLT = NamingConvention()
+
+COLUMNAS_REPORTE = {
+    "archivo": {"data_type": "text"},
+    "version_contrato": {"data_type": "bigint"},
+    "faltantes_obligatorias": {"data_type": "text"},
+    "faltantes_opcionales": {"data_type": "text"},
+    "nuevas": {"data_type": "text"},
+    "tipos_distintos": {"data_type": "text"},
+    "resultado": {"data_type": "text"},
+    "fecha_hora": {"data_type": "timestamp"},
+}
 
 
 def cargar_contrato():
@@ -18,28 +33,15 @@ def cargar_contrato():
 
 
 def a_snake_case(nombre):
-    nombre = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", nombre)
-    nombre = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", nombre)
-    return nombre.lower()
+    """La misma regla que usa dlt para nombrar columnas: PULocationID -> pu_location_id."""
+    return NOMBRES_DLT.normalize_identifier(nombre)
 
 
-def leer_esquema_real(ruta):
-    """Devuelve una lista de (nombre original, nombre normalizado, tipo)."""
-    filas = duckdb.sql(f"""
-        SELECT column_name, column_type
-        FROM (DESCRIBE SELECT * FROM read_parquet('{ruta}', hive_partitioning = false))
-    """).fetchall()
-
-    esquema = []
-    for nombre, tipo in filas:
-        esquema.append((nombre, a_snake_case(nombre), tipo))
-    return esquema
-
-
-def comparar(esquema_real, contrato):
+def comparar(esquema_arrow, contrato):
+    """Compara el esquema del archivo contra el contrato. Devuelve las cuatro listas de diferencias."""
     reales = {}
-    for original, normalizado, tipo in esquema_real:
-        reales[normalizado] = tipo
+    for campo in esquema_arrow:
+        reales[a_snake_case(campo.name)] = str(campo.type)
 
     esperadas = {}
     for columna in contrato["columns"]:
@@ -70,70 +72,82 @@ def comparar(esquema_real, contrato):
     return reporte
 
 
-def cargar_mes(mes):
-    """Valida el archivo del mes y lo carga en la tabla unificada. Devuelve True si quedó bien."""
-    url, ruta = armar_rutas(mes)
-    contrato = cargar_contrato()
-    tabla = contrato["tabla"]
-    esquema_real = leer_esquema_real(ruta)
-    reporte = comparar(esquema_real, contrato)
+def cumple(reporte):
+    """Se frena solo si falta una columna obligatoria o cambió un tipo.
+    Una opcional faltante se carga nula; una columna nueva se reporta y se ignora."""
+    return not reporte["faltantes_obligatorias"] and not reporte["tipos_distintos"]
+
+
+def validar_archivo(pipeline, ruta, contrato):
+    """Compara el archivo contra el contrato, lo muestra, lo guarda en raw.reporte_esquema
+    y devuelve True si se puede cargar."""
+    reporte = comparar(pq.read_schema(ruta), contrato)
+    ok = cumple(reporte)
 
     print(f"Esquema de {ruta.name} contra el contrato v{contrato['version']}:")
     for tipo_diferencia, columnas in reporte.items():
-        print(f"  {tipo_diferencia:24} {columnas if columnas else 'ninguna'}")
+        print(f"  {tipo_diferencia:24} {', '.join(columnas) if columnas else 'ninguna'}")
+    print("  resultado:", "cumple, se carga" if ok else "NO CUMPLE, no se carga")
 
-    if reporte["faltantes_obligatorias"] or reporte["tipos_distintos"]:
-        print("ERROR: el archivo no cumple el contrato. No se carga.")
-        return False
+    fila = {
+        "archivo": ruta.name,
+        "version_contrato": contrato["version"],
+        "faltantes_obligatorias": ", ".join(reporte["faltantes_obligatorias"]),
+        "faltantes_opcionales": ", ".join(reporte["faltantes_opcionales"]),
+        "nuevas": ", ".join(reporte["nuevas"]),
+        "tipos_distintos": ", ".join(reporte["tipos_distintos"]),
+        "resultado": "ok" if ok else "rechazado",
+        "fecha_hora": datetime.now(),
+    }
+    pipeline.run([fila], table_name="reporte_esquema", write_disposition="append", columns=COLUMNAS_REPORTE)
+    return ok
 
-    originales = {}
-    for original, normalizado, tipo in esquema_real:
-        originales[normalizado] = original
 
-    definiciones = []
-    selecciones = []
+def ajustar_al_contrato(tabla, contrato):
+    """Deja un lote con las columnas del contrato, en snake_case y en su orden.
+    - Una columna opcional que falta (cbd_congestion_fee en 2024) se agrega nula, con su tipo.
+    - Una columna que no está en el contrato queda afuera.
+    """
+    tabla = tabla.rename_columns([a_snake_case(nombre) for nombre in tabla.column_names])
+
+    columnas = []
+    nombres = []
     for columna in contrato["columns"]:
         nombre = columna["name"]
-        tipo = columna["type"]
-        definiciones.append(f"{nombre} {tipo}")
-        if nombre in originales:
-            selecciones.append(f'"{originales[nombre]}" AS {nombre}')
+        if nombre in tabla.column_names:
+            columnas.append(tabla[nombre])
         else:
-            selecciones.append(f"CAST(NULL AS {tipo}) AS {nombre}")
+            columnas.append(pa.nulls(tabla.num_rows, pa.type_for_alias(columna["type"])))
+        nombres.append(nombre)
 
-    con = duckdb.connect(str(RUTA_DB))
-    con.execute(f"""
-        CREATE TABLE IF NOT EXISTS {tabla} (
-            {", ".join(definiciones)},
-            archivo_origen VARCHAR,
-            mes_archivo VARCHAR
-        )
-    """)
-    con.execute(f"DELETE FROM {tabla} WHERE mes_archivo = ?", [mes])
-    con.execute(f"""
-        INSERT INTO {tabla}
-        SELECT
-            {", ".join(selecciones)},
-            '{ruta.name}' AS archivo_origen,
-            '{mes}' AS mes_archivo
-        FROM read_parquet('{ruta}', hive_partitioning = false)
-    """)
-    filas = con.execute(
-        f"SELECT count(*) FROM {tabla} WHERE mes_archivo = ?", [mes]
-    ).fetchall()[0][0]
-    con.close()
-
-    print(f"OK: {filas} filas de {mes} cargadas en la tabla {tabla}.")
-    return True
+    return pa.table(columnas, names=nombres)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Valida el esquema de un mes y lo carga.")
-    parser.add_argument("--mes", required=True, help="Mes a cargar, formato AAAA-MM")
-    args = parser.parse_args()
+    """Muestra la comparación de un archivo ya descargado contra el contrato, sin cargar nada.
+    (En el pipeline, esta comparación la hace la ingesta antes de cargar cada archivo.)"""
+    import argparse
+    import sys
 
-    if not cargar_mes(args.mes):
-        sys.exit(1)
+    from src.ingesta import armar_rutas
+    from src.meses import es_mes_valido
+
+    parser = argparse.ArgumentParser(description="Compara el esquema de un archivo descargado contra el contrato.")
+    parser.add_argument("--mes", required=True, help="Mes del archivo, formato AAAA-MM")
+    args = parser.parse_args()
+    if not es_mes_valido(args.mes):
+        parser.error("--mes tiene que tener formato AAAA-MM, por ejemplo 2025-03")
+
+    _, ruta = armar_rutas(args.mes)
+    if not ruta.exists():
+        parser.error(f"{ruta} no existe: primero hay que correr la ingesta de {args.mes}.")
+    contrato = cargar_contrato()
+    reporte = comparar(pq.read_schema(ruta), contrato)
+    print(f"Esquema de {ruta.name} contra el contrato v{contrato['version']}:")
+    for tipo_diferencia, columnas in reporte.items():
+        print(f"  {tipo_diferencia:24} {', '.join(columnas) if columnas else 'ninguna'}")
+    print("  resultado:", "cumple" if cumple(reporte) else "NO CUMPLE")
+    sys.exit(0 if cumple(reporte) else 1)
 
 
 if __name__ == "__main__":

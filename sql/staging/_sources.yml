@@ -1,6 +1,6 @@
 version: 2
 
-# Lo que cargó dlt (pipeline/ingesta.py). dbt no escribe en raw: solo lee.
+# Lo que cargó dlt (src/ingesta.py). dbt no escribe en raw: solo lee.
 sources:
   - name: raw
     schema: raw

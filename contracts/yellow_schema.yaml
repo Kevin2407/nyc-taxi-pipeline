@@ -3,7 +3,7 @@
 # name: nombre de la columna ya pasada a snake_case (PULocationID -> pu_location_id),
 #       con la misma regla que usa dlt.
 # type: tipo de Arrow con el que tiene que venir en el Parquet. Se compara contra
-#       el esquema real del archivo ANTES de cargarlo (pipeline/esquema.py).
+#       el esquema real del archivo ANTES de cargarlo (src/esquema.py).
 # opcional: true si la columna puede faltar en un archivo. Si falta, se carga nula.
 #
 # Qué hace el pipeline con las diferencias:

@@ -16,7 +16,7 @@
       "id": 1,
       "type": "stat",
       "title": "Resultado de la última corrida, por etapa y mes",
-      "description": "1 si la etapa terminó bien, 0 si falló (pipeline/metricas.py).",
+      "description": "1 si la etapa terminó bien, 0 si falló (src/metricas.py).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -481,5 +481,5 @@
     }
   ],
   "editable": true,
-  "description": "Duración, RAM, CPU y filas de cada etapa del pipeline (ingesta, dbt, exportación), publicadas al Pushgateway por pipeline/metricas.py."
+  "description": "Duración, RAM, CPU y filas de cada etapa del pipeline (ingesta, dbt, exportación), publicadas al Pushgateway por src/metricas.py."
 }

@@ -1,163 +1,71 @@
-"""Etapa de calidad del pipeline."""
+"""Parte 3 de la consigna: calidad de datos y cuarentena.
+
+Las reglas viven en dos lugares, a propósito:
+    contracts/reglas_calidad.csv      id, descripción, severidad, umbral y justificación de cada regla
+    sql/calidad/trips_evaluados.sql   la condición SQL de cada regla
+dbt arma, a partir de raw.yellow_trips (pasando por sql/staging):
+    calidad.trips_validos            filas aceptadas, con las advertencias en la columna flags
+    calidad.cuarentena               filas rechazadas: fila original, archivo de origen y reglas violadas
+    calidad.reporte_calidad          por mes: leídas, aceptadas y en cuarentena
+    calidad.reporte_calidad_reglas   por mes y regla: cuántas filas la violan
+y corre el test de reconciliación (tests/dbt/reconciliacion.sql): si leídas no es igual a
+aceptadas + cuarentena, el test falla y la etapa termina con error.
+
+Uso (desde el contenedor):
+    python -m src.calidad --mes 2025-03                   corre la etapa y muestra el reporte
+    python -m src.calidad --mes 2025-03 --solo-reporte    solo muestra el reporte (para la demo)
+"""
 import argparse
 import sys
-from datetime import datetime
-from pathlib import Path
 
-import duckdb
-import yaml
-
-from src.esquema import cargar_contrato
-from src.ingesta import RUTA_DB, RUTA_ZONAS
-
-RUTA_REGLAS = Path("contracts/reglas_calidad.yaml")
+from src.base import imprimir_tabla
+from src.correr_dbt import correr_dbt
+from src.meses import es_mes_valido, mes_anterior
 
 
-def cargar_reglas():
-    with open(RUTA_REGLAS, encoding="utf-8") as archivo:
-        return yaml.safe_load(archivo)["reglas"]
+def validar(mes):
+    """Corre staging y calidad con dbt (con todos sus tests). Devuelve True si todo pasó."""
+    return correr_dbt("build", ["+calidad"], mes)
 
 
-def cargar_zonas(con):
-    con.execute(f"""
-        CREATE OR REPLACE TABLE zonas AS
-        SELECT
-            "LocationID" AS location_id,
-            "Borough" AS borough,
-            "Zone" AS zone,
-            service_zone
-        FROM read_csv('{RUTA_ZONAS}')
-    """)
-
-
-def armar_lista(reglas, severidad):
-    """Arma el SQL que devuelve, para cada fila, los ids de las reglas violadas de esa severidad."""
-    casos = []
-    for regla in reglas:
-        if regla["severidad"] != severidad:
-            continue
-        if regla.get("tipo") == "duplicado":
-            condicion = "copia > 1"
-        else:
-            condicion = regla["condicion"]
-        casos.append(f"CASE WHEN {condicion} THEN '{regla['id']}' END")
-    return "concat_ws(',', " + ", ".join(casos) + ")"
-
-
-def evaluar(con, mes, reglas, columnas):
-    """Crea la tabla temporal evaluadas: las filas del mes con sus reglas violadas."""
-    con.execute(f"""
-        CREATE OR REPLACE TEMP TABLE evaluadas AS
-        SELECT
-            *,
-            {armar_lista(reglas, "rechazo")} AS reglas_violadas,
-            {armar_lista(reglas, "advertencia")} AS flags
-        FROM (
-            SELECT
-                *,
-                row_number() OVER (PARTITION BY {", ".join(columnas)}) AS copia
-            FROM yellow_trips
-            WHERE mes_archivo = '{mes}'
-        )
-    """)
-
-
-def separar(con, mes, columnas):
-    """Reparte las filas evaluadas entre trips_validos y cuarentena."""
-    base = ", ".join(columnas) + ", archivo_origen, mes_archivo"
-
-    con.execute(f"CREATE TABLE IF NOT EXISTS trips_validos AS SELECT {base}, flags FROM evaluadas LIMIT 0")
-    con.execute(f"CREATE TABLE IF NOT EXISTS cuarentena AS SELECT {base}, reglas_violadas FROM evaluadas LIMIT 0")
-
-    con.execute("DELETE FROM trips_validos WHERE mes_archivo = ?", [mes])
-    con.execute("DELETE FROM cuarentena WHERE mes_archivo = ?", [mes])
-
-    con.execute(f"INSERT INTO trips_validos SELECT {base}, flags FROM evaluadas WHERE reglas_violadas = ''")
-    con.execute(f"INSERT INTO cuarentena SELECT {base}, reglas_violadas FROM evaluadas WHERE reglas_violadas <> ''")
-
-
-def contar(con, tabla, mes):
-    return con.execute(f"SELECT count(*) FROM {tabla} WHERE mes_archivo = ?", [mes]).fetchall()[0][0]
-
-
-def reportar(con, mes, reglas):
-    """Guarda e imprime el reporte de calidad del mes. Devuelve (leídas, aceptadas, en cuarentena)."""
-    leidas = contar(con, "yellow_trips", mes)
-    aceptadas = contar(con, "trips_validos", mes)
-    en_cuarentena = contar(con, "cuarentena", mes)
-
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS reporte_calidad (
-            mes_archivo VARCHAR, filas_leidas BIGINT, filas_aceptadas BIGINT,
-            filas_cuarentena BIGINT, fecha_hora TIMESTAMP
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS reporte_calidad_reglas (
-            mes_archivo VARCHAR, regla VARCHAR, nombre VARCHAR, severidad VARCHAR, filas BIGINT
-        )
-    """)
-    con.execute("DELETE FROM reporte_calidad WHERE mes_archivo = ?", [mes])
-    con.execute("DELETE FROM reporte_calidad_reglas WHERE mes_archivo = ?", [mes])
-    con.execute(
-        "INSERT INTO reporte_calidad VALUES (?, ?, ?, ?, ?)",
-        [mes, leidas, aceptadas, en_cuarentena, datetime.now()],
+def mostrar_reporte(mes):
+    meses = (mes, mes_anterior(mes))
+    imprimir_tabla(
+        "Reporte de calidad por mes (calidad.reporte_calidad)",
+        "SELECT mes_archivo, filas_leidas, filas_aceptadas, filas_cuarentena, pct_cuarentena, "
+        "filas_leidas = filas_aceptadas + filas_cuarentena AS reconciliacion_cierra "
+        "FROM calidad.reporte_calidad WHERE mes_archivo IN %s ORDER BY mes_archivo",
+        (meses,),
     )
-
-    print(f"Reporte de calidad {mes}")
-    print(f"  leídas        {leidas:>9}")
-    print(f"  aceptadas     {aceptadas:>9}")
-    print(f"  en cuarentena {en_cuarentena:>9}")
-
-    for regla in reglas:
-        if regla["severidad"] == "rechazo":
-            columna = "reglas_violadas"
-        else:
-            columna = "flags"
-        filas = con.execute(
-            f"SELECT count(*) FROM evaluadas WHERE contains({columna}, ?)", [regla["id"]]
-        ).fetchall()[0][0]
-        con.execute(
-            "INSERT INTO reporte_calidad_reglas VALUES (?, ?, ?, ?, ?)",
-            [mes, regla["id"], regla["nombre"], regla["severidad"], filas],
-        )
-        print(f"  {regla['id']} {regla['nombre']:24} {regla['severidad']:12} {filas:>9}")
-
-    return leidas, aceptadas, en_cuarentena
-
-
-def validar_mes(mes):
-    """Aplica las reglas al mes. Devuelve True si la reconciliación cierra."""
-    reglas = cargar_reglas()
-    columnas = []
-    for columna in cargar_contrato()["columns"]:
-        columnas.append(columna["name"])
-
-    con = duckdb.connect(str(RUTA_DB))
-    cargar_zonas(con)
-    evaluar(con, mes, reglas, columnas)
-    separar(con, mes, columnas)
-    leidas, aceptadas, en_cuarentena = reportar(con, mes, reglas)
-    con.close()
-
-    if not reconciliacion_cierra(leidas, aceptadas, en_cuarentena):
-        print(f"ERROR de reconciliación: {leidas} leídas != {aceptadas} aceptadas + {en_cuarentena} en cuarentena.")
-        return False
-
-    print("OK: la reconciliación cierra (leídas = aceptadas + cuarentena).")
-    return True
-
-def reconciliacion_cierra(leidas, aceptadas, en_cuarentena):
-    return leidas == aceptadas + en_cuarentena
+    imprimir_tabla(
+        "Filas por regla (calidad.reporte_calidad_reglas)",
+        "SELECT regla, nombre, severidad, "
+        "sum(filas) FILTER (WHERE mes_archivo = %s) AS mes_anterior, "
+        "sum(filas) FILTER (WHERE mes_archivo = %s) AS mes_asignado "
+        "FROM calidad.reporte_calidad_reglas GROUP BY regla, nombre, severidad ORDER BY regla",
+        (meses[1], meses[0]),
+    )
+    imprimir_tabla(
+        f"Una fila en cuarentena por cada combinación de reglas violadas ({mes})",
+        "SELECT DISTINCT ON (reglas_violadas) reglas_violadas, archivo_origen, tpep_pickup_datetime, "
+        "tpep_dropoff_datetime, trip_distance, total_amount, pu_location_id, do_location_id "
+        "FROM calidad.cuarentena WHERE mes_archivo = %s ORDER BY reglas_violadas, trip_distance DESC",
+        (mes,),
+    )
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Aplica las reglas de calidad a un mes.")
-    parser.add_argument("--mes", required=True, help="Mes a validar, formato AAAA-MM")
+    parser = argparse.ArgumentParser(description="Reglas de calidad, cuarentena, reporte y reconciliación.")
+    parser.add_argument("--mes", required=True, help="Mes asignado, formato AAAA-MM")
+    parser.add_argument("--solo-reporte", action="store_true", help="No corre dbt; solo muestra el reporte")
     args = parser.parse_args()
+    if not es_mes_valido(args.mes):
+        parser.error("--mes tiene que tener formato AAAA-MM, por ejemplo 2025-03")
 
-    if not validar_mes(args.mes):
+    if not args.solo_reporte and not validar(args.mes):
+        print("ERROR: la etapa de calidad falló (ver el test que no pasó, por ejemplo la reconciliación).")
         sys.exit(1)
+    mostrar_reporte(args.mes)
 
 
 if __name__ == "__main__":

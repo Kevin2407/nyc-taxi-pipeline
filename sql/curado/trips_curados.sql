@@ -1,6 +1,6 @@
 -- Parte 4 de la consigna: capa curada.
 -- Una fila por viaje aceptado (trips_validos), con las columnas derivadas y las zonas.
--- La exportación a Parquet particionado por year/month la hace pipeline/exportar.py.
+-- La exportación a Parquet particionado por year/month la hace src/transformacion.py (con Polars).
 with validos as (
     select * from {{ ref('trips_validos') }}
 ),

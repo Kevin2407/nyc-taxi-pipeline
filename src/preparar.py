@@ -2,7 +2,7 @@
 
 1. Crea la base de datos "dagster" en Postgres, si no existe: ahí Dagster guarda el historial
    de corridas, sus logs y el estado del sensor. Va separada de la base "taxi" de los datos.
-2. Genera el manifest de dbt (dbt/target/manifest.json) con "dbt parse": es el mapa de modelos,
+2. Genera el manifest de dbt (target/manifest.json) con "dbt parse": es el mapa de modelos,
    tests y dependencias que Dagster lee para dibujar el grafo de assets.
 """
 import os

@@ -1,63 +1,58 @@
-# Pipeline NYC Taxi.
+# Pipeline NYC Taxi. Todo corre en Docker: estos objetivos son atajos de "docker compose".
+# En Windows sin make, cada objetivo se corre copiando su comando (ver README).
 #
-# Uso:
-#   make all MES=2025-03     corre todo para el mes y el mismo mes del año anterior
-#   make test                corre los tests automáticos
-#   make limpiar-datos       borra data/ para correr desde cero
+#   make all MES=2025-03     comando único: levanta todo y corre el pipeline completo
+#   make reporte             demo: reporte de calidad y filas en cuarentena
+#   make respuestas          las 6 respuestas de negocio
+#   make test                tests automáticos
+#   make levantar / apagar   prende o apaga la plataforma (Dagster, Grafana, Postgres...)
 #
-# Si no se pasa MES, se usa 2025-03. El mes de comparación se calcula solo.
+# Etapas sueltas, sin Dagster (para desarrollo o para mostrarlas de a una):
+#   make ingesta | esquema | calidad | transformacion | modelo
 
 MES ?= 2025-03
 MES_ANTERIOR := $(shell echo $(MES) | awk -F- '{ printf "%d-%s", $$1 - 1, $$2 }')
+CORRER := docker compose run --rm -e MES=$(MES) herramientas
 
-# Python con el que se crea el entorno virtual. Se puede cambiar, por ejemplo:
-#   make all PYTHON_BASE=/opt/anaconda3/envs/py311/bin/python
-PYTHON_BASE ?= python3
-VENV := .venv
-PYTHON := $(VENV)/bin/python
+.PHONY: all levantar apagar reporte respuestas test ingesta esquema calidad transformacion modelo limpiar
 
-.PHONY: all ingesta esquema calidad transformacion modelo test limpiar-datos
+all:
+	docker compose run --rm -e MES=$(MES) pipeline
 
-all: modelo
+levantar:
+	docker compose up -d
 
-INSTALADO := $(VENV)/.instalado
+apagar:
+	docker compose down
 
-# Crea el entorno virtual, solo si no existe.
-$(PYTHON):
-	$(PYTHON_BASE) -m venv $(VENV)
+reporte:
+	$(CORRER) python -m src.calidad --mes $(MES) --solo-reporte
 
-# Instala las dependencias. Se vuelve a correr solo si cambia requirements.txt.
-$(INSTALADO): requirements.txt | $(PYTHON)
-	$(PYTHON) -m pip install --quiet -r requirements.txt
-	touch $(INSTALADO)
+respuestas:
+	$(CORRER) python -m src.modelo --mes $(MES) --solo-respuestas
 
-ingesta: $(INSTALADO)
-	@echo "== 1. Ingesta: $(MES) y $(MES_ANTERIOR) =="
-	$(PYTHON) -m src.ingesta --mes $(MES)
-	$(PYTHON) -m src.ingesta --mes $(MES_ANTERIOR)
+test:
+	docker compose run --rm herramientas pytest
 
-esquema: ingesta
-	@echo "== 2. Esquema =="
-	$(PYTHON) -m src.esquema --mes $(MES)
-	$(PYTHON) -m src.esquema --mes $(MES_ANTERIOR)
+ingesta:
+	$(CORRER) python -m src.ingesta --mes $(MES)
+	$(CORRER) python -m src.ingesta --mes $(MES_ANTERIOR)
 
-calidad: esquema
-	@echo "== 3. Calidad =="
-	$(PYTHON) -m src.calidad --mes $(MES)
-	$(PYTHON) -m src.calidad --mes $(MES_ANTERIOR)
+esquema:
+	$(CORRER) python -m src.esquema --mes $(MES)
+	$(CORRER) python -m src.esquema --mes $(MES_ANTERIOR)
 
-transformacion: calidad
-	@echo "== 4. Transformación =="
-	$(PYTHON) -m src.transformacion --mes $(MES)
-	$(PYTHON) -m src.transformacion --mes $(MES_ANTERIOR)
+calidad:
+	$(CORRER) python -m src.calidad --mes $(MES)
 
-modelo: transformacion
-	@echo "== 5. Modelo y preguntas =="
-	$(PYTHON) -m src.modelo --mes $(MES)
+transformacion:
+	$(CORRER) python -m src.transformacion --mes $(MES)
+	$(CORRER) python -m src.transformacion --mes $(MES_ANTERIOR) --solo-parquet
 
-test: $(INSTALADO)
-	$(PYTHON) -m pytest -q
+modelo:
+	$(CORRER) python -m src.modelo --mes $(MES)
 
-# Si el Finder de macOS crea un .DS_Store mientras se borra, rm falla; se reintenta una vez.
-limpiar-datos:
+# Borra TODO lo generado (volúmenes de Docker y data/) para probar desde cero.
+limpiar:
+	docker compose down -v
 	rm -rf data || (sleep 1 && rm -rf data)

@@ -16,8 +16,8 @@ dagster-webserver==1.13.31
 dagster-postgres==0.29.31
 dagster-dbt==0.29.31
 
-# Capa curada en Parquet (pipeline/exportar.py): usa pyarrow y psycopg2,
-# que ya instalan dlt[parquet] y dlt[postgres].
+# Capa curada en Parquet particionado (src/transformacion.py)
+polars==2.1.0
 
 # Métricas de los procesos
 psutil==7.2.2
