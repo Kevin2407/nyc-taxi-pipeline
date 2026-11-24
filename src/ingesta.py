@@ -53,9 +53,20 @@ def descargar(url, destino):
     respuesta = requests.get(url, stream=True, timeout=60)
     respuesta.raise_for_status()
 
+    escritos = 0
     with open(temporal, "wb") as archivo:
         for bloque in respuesta.iter_content(chunk_size=TAMANIO_BLOQUE):
             archivo.write(bloque)
+            escritos += len(bloque)
+
+    # Un 200 no garantiza el archivo: si llegó vacío o cortado, se descarta y cuenta como
+    # falla de red, así entra en los reintentos y nunca queda un archivo roto con el nombre bueno.
+    esperados = respuesta.headers.get("Content-Length")
+    if escritos == 0 or (esperados is not None and int(esperados) != escritos):
+        temporal.unlink(missing_ok=True)
+        raise requests.RequestException(
+            f"descarga incompleta: {escritos} bytes recibidos, {esperados or 'desconocido'} esperados"
+        )
 
     temporal.replace(destino)
 
