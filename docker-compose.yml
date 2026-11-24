@@ -34,6 +34,9 @@ x-pipeline: &pipeline
     # El merge de dlt carga primero a raw_staging y después pasa los datos a raw.
     # Con esto vacía raw_staging al terminar, para no guardar dos copias del mes.
     LOAD__TRUNCATE_STAGING_DATASET: "true"
+    # Polars usa por defecto un hilo por núcleo: en una Mac de 8 núcleos eso subía la RAM de
+    # la exportación a 1,2 GB y competía con Postgres. Con 2 hilos queda como en Linux.
+    POLARS_MAX_THREADS: "2"
     # dbt busca acá el proyecto y la conexión (dbt_project.yml y profiles.yml, en la raíz del repo)
     DBT_PROJECT_DIR: /app
     DBT_PROFILES_DIR: /app

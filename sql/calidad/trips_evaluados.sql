@@ -3,7 +3,7 @@
 
   - La CONDICIÓN de cada regla está acá abajo, en SQL: es verdadera cuando la fila VIOLA la regla.
   - La SEVERIDAD (rechazo o advertencia), la descripción y la justificación están en
-    seeds/reglas_calidad.csv. dbt lee ese seed antes de armar el SQL: cambiar una
+    contracts/reglas_calidad.csv (un seed de dbt). dbt lee ese seed antes de armar el SQL: cambiar una
     severidad es editar una celda del CSV, no este archivo.
   - Si una condición da nulo porque falta un dato, CASE WHEN no la marca: la fila
     no viola la regla (no podemos afirmar que esté mal).

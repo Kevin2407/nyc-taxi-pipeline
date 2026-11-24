@@ -13,8 +13,8 @@
 #
 # Para aceptar una columna nueva: agregarla acá y subir version. El cambio queda en Git.
 #
-# v1 (16/11/2026): tipos de DuckDB, para la versión anterior del pipeline.
-# v2 (22/11/2026): tipos de Arrow, para la ingesta con dlt.
+# v1 (16/11/2026): primera versión.
+# v2 (22/11/2026): los tipos se expresan como tipos de Arrow, que es como se lee el Parquet antes de cargarlo.
 
 version: 2
 tabla: yellow_trips

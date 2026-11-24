@@ -28,6 +28,8 @@ Ese comando construye la imagen (la primera vez), levanta Postgres, Dagster y la
 | `make test` | Tests automáticos (pytest, contra una base de prueba aparte) |
 | `make levantar` / `make apagar` | Deja prendida o apaga la plataforma |
 | `make ingesta`, `esquema`, `calidad`, `transformacion`, `modelo` | Cada etapa por separado, sin Dagster |
+| `make reprocesar MES=2025-03` | Vuelve a escribir solo la partición Parquet de ese mes |
+| `make explorar` | Consultas de exploración sobre los datos cargados (`exploracion/*.sql`) |
 | `make limpiar` | Borra la base, los volúmenes y `data/` para correr desde cero |
 
 Mientras la plataforma está prendida:
@@ -71,7 +73,7 @@ macros/                   funciones de Jinja que usan los modelos de dbt
 dbt_project.yml · profiles.yml   configuración de dbt
 dagster/                  configuración de Dagster
 observabilidad/           Prometheus, Grafana (datasources y tableros), Loki y Alloy
-exploracion/HALLAZGOS.md  mediciones sobre los datos crudos que justifican umbrales y severidades
+exploracion/              consultas SQL sobre los datos crudos y HALLAZGOS.md, que justifican umbrales y severidades
 ```
 
 `data/` no se sube (está en `.gitignore`): ahí el pipeline deja los archivos crudos (`data/raw/`) y la capa curada (`data/curated/`).
@@ -193,12 +195,14 @@ Columnas derivadas de `curado.trips_curados` (`sql/curado/trips_curados.sql`):
 
 La capa curada se escribe además en Parquet particionado estilo Hive, `data/curated/yellow/year=AAAA/month=MM/trips.parquet` (`src/transformacion.py`): Postgres saca el mes con `COPY` y Polars escribe el Parquet en streaming. Se escribe a un `.tmp` y se renombra; después se cuentan sus filas y se comparan con Postgres.
 
-**Reprocesar un mes reemplaza solo su partición.** Prueba del 23/11/2026 en la Mac (con el script de exportación anterior a Polars), reprocesando marzo 2025:
+**Reprocesar un mes reemplaza solo su partición.** `make reprocesar MES=2025-03` vuelve a escribir solo la partición de marzo 2025 y muestra las particiones antes y después. Prueba del 23/11/2026 en la Mac (horas UTC del contenedor):
 
 | Partición | Filas antes | Archivo antes | Filas después | Archivo después |
 | --- | --- | --- | --- | --- |
-| `year=2024/month=03` | 3.535.924 | 128.560.656 bytes, 18:56:09 | 3.535.924 | 128.560.656 bytes, 18:56:09 (sin tocar) |
-| `year=2025/month=03` | 4.053.200 | 147.281.299 bytes, 18:57:38 | 4.053.200 | 147.264.119 bytes, 18:58:46 (reescrito) |
+| `year=2024/month=03` | 3.535.924 | 106.453.144 bytes, 01:27:10 | 3.535.924 | 106.453.144 bytes, 01:27:10 (sin tocar) |
+| `year=2025/month=03` | 4.053.200 | 124.426.701 bytes, 01:26:09 | 4.053.200 | 123.925.467 bytes, 02:11:17 (reescrito) |
+
+El tamaño del archivo reescrito cambia un poco porque Postgres no devuelve las filas siempre en el mismo orden y la compresión de Parquet depende del orden; las filas son las mismas.
 
 ### Parte 5: modelo
 
@@ -246,25 +250,26 @@ Ejemplo de uso: el tablero de procesos mostró que la exportación tardaba 2,8 m
 
 ## Limitaciones conocidas
 
-- **Mac de 8 GB:** con todo el stack prendido, la memoria queda justa y el tiempo de dbt varía entre corridas (de 4,9 a 6,9 minutos medido) según lo que esté usando la máquina. Conviene darle a Docker Desktop entre 5 y 6 GB.
+- **Mac de 8 GB:** con todo el stack prendido, la memoria queda justa y el tiempo de dbt varía entre corridas (de 8,4 a 12 minutos medido) según lo que esté usando la máquina. Conviene darle a Docker Desktop entre 5 y 6 GB.
 - **La primera ejecución** descarga las imágenes de Docker (varios GB) e instala las librerías: tarda bastante más que las siguientes.
 - **dbt reconstruye todas las tablas en cada corrida** (no es incremental). Con dos meses son unos minutos; con muchos meses convendría materializar por mes.
 - **La ingesta reintenta ante cualquier error de descarga,** también los que no se arreglan reintentando: un mes que todavía no está publicado devuelve `403` y espera 14 segundos en total antes de registrar el error.
 - **Las tablas de calidad y del modelo guardan copias de los datos** (unos 8 a 9 GB de disco para los dos meses, entre Postgres y Parquet).
 - **`R02` se multiplicó por 20 entre 2024 y 2025** (1.128 contra 22.280 filas). Casi todas son pagos con tarjeta con la misma hora exacta de subida y bajada; no sabemos la causa.
 - **Windows:** Alloy lee los logs por el socket de Docker (`/var/run/docker.sock`), que Docker Desktop ofrece en esa ruta. Clonar el repo dentro de WSL evita la lentitud de las carpetas compartidas.
-- **La exploración** (`exploracion/`) se hizo con DuckDB en la versión anterior del pipeline; sus scripts no forman parte del pipeline actual.
 
 ## Tiempo de ejecución y pico de RAM
 
-Medido el 23/11/2026 en una MacBook Air M2 con 8 GB de RAM, con el pipeline completo orquestado por Dagster (`make all MES=2025-03`) y los datos ya descargados. Los números salen del tablero "Pipeline - procesos":
+Medido el 23/11/2026 en una MacBook Air M2 con 8 GB de RAM, con el pipeline completo orquestado por Dagster (`make all MES=2025-03`) y los datos ya descargados. Los números salen del tablero "Pipeline - procesos" y del log de Dagster. La corrida completa tardó **15 min 26 s** de punta a punta.
 
-| Etapa | Duración | Pico de RAM del proceso |
-| --- | --- | --- |
-| Ingesta (sin cambios, por mes) | 0,1 a 3 s | unos 290 MB |
-| Ingesta (primera carga, por mes) | 79 a 83 s | — |
-| dbt (staging, calidad, curado, modelo, preguntas y 26 tests) | 4,9 a 6,9 min | unos 500 MB (más Postgres, con techo de 1,5 GB) |
-| Exportación a Parquet (por mes) | 1,2 a 1,8 min | 775 a 889 MB |
+| Etapa | Duración | Pico de RAM del proceso | CPU |
+| --- | --- | --- | --- |
+| Ingesta sin cambios (por mes) | 0,4 a 2,7 s | 345 a 353 MB | menos de 1 s |
+| Ingesta, primera carga (por mes) | 79 a 83 s | — | — |
+| dbt: staging, calidad, curado, modelo, preguntas y 26 tests | 12 min (8,4 a 12 min según la corrida) | 550 MB (más Postgres, con techo de 1,5 GB) | 83 s |
+| Exportación a Parquet (por mes) | 55 s (2024-03) y 100 s (2025-03) | 711 a 721 MB | 52 a 143 s |
+
+dbt es lo que más tarda: reconstruye en cada corrida las tablas de los dos meses (unos 7,7 millones de filas) y su tiempo depende de cuánta memoria le queda libre a Postgres en la máquina. Polars corre con 2 hilos (`POLARS_MAX_THREADS`): con un hilo por núcleo, en la Mac la exportación llegaba a 1,2 GB y competía con Postgres.
 
 Postgres tiene un techo de 1,5 GB y el resto de los contenedores, techos que suman menos de 3 GB más.
 
@@ -273,4 +278,4 @@ Postgres tiene un techo de 1,5 GB y el resto de los contenedores, techos que sum
 | Herramienta | Para qué se usó |
 | --- | --- |
 | GitHub Copilot | Generar la estructura inicial de carpetas y archivos vacíos (PR #1) |
-| Claude | Guía paso a paso y explicación de conceptos y herramientas. En la versión anterior (Python + DuckDB, rama `master`), propuso el código que escribimos, ejecutamos y probamos nosotros. En esta versión con el stack de clase escribió la mayor parte del código y la configuración (docker-compose, Dockerfile, módulos de `src/`, el SQL de dbt a partir de nuestras consultas anteriores, los tests y los tableros), que nosotros corrimos, revisamos y probamos en nuestras máquinas. También redactó `DECISIONES.md`, `RESULTADOS.md` y este README a partir de nuestras corridas |
+| Claude | Guía paso a paso y explicación de conceptos y herramientas. Escribió la mayor parte del código y la configuración (docker-compose, Dockerfile, módulos de `src/`, SQL de dbt, tests y tableros de Grafana) a partir de nuestras decisiones, y redactó `DECISIONES.md`, `RESULTADOS.md` y este README a partir de nuestras corridas. Nosotros lo ejecutamos, lo revisamos y lo probamos en nuestras máquinas |

@@ -1,4 +1,4 @@
-# Imagen del pipeline: Python con dlt, dbt, Dagster y DuckDB.
+# Imagen del pipeline: Python con dlt, dbt, Dagster y Polars.
 # La usan los servicios del docker-compose que corren código nuestro.
 FROM python:3.12-slim
 

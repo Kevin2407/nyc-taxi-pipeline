@@ -69,7 +69,7 @@ limit 10
 | 2025-03 | 5 (5:00 a 5:59) | 32.592 | 33,75 USD |
 | 2024-03 | 5 (5:00 a 5:59) | 22.684 | 35,19 USD |
 
-**Interpretación:** a las 5 de la mañana hay pocos viajes pero largos: el 18 a 21 % toca un aeropuerto (contra 8 a 9 % en el resto del día) y la distancia media es de 5,7 millas contra 3,3 (datos de `exploracion/explorar_resultados.py`, exploración de la versión anterior).
+**Interpretación:** a las 5 de la mañana hay pocos viajes pero largos: el 18 a 21 % toca un aeropuerto (contra 8 a 9 % en el resto del día) y la distancia media es de 5,7 millas contra 3,3 (datos de `exploracion/04_resultados.sql`).
 
 El ingreso es `total_amount`. El promedio se calcula como ingreso total / viajes de la hora, a partir de `agg_zone_hour`. Postgres no tiene `QUALIFY`: `DISTINCT ON` se queda con la hora de mayor ingreso de cada mes.
 
@@ -247,7 +247,7 @@ order by d.anio_mes desc
 4. Hipótesis: en 2025 una parte mayor de los viajes se pide y paga por aplicación y se registra con ese tipo de pago.
 5. No podemos confirmarlo con estos datos; habría que comparar más meses o el origen de cada viaje.
 
-Datos del desglose por tipo de pago: `exploracion/explorar_resultados.py` (exploración hecha con DuckDB en la versión anterior del pipeline).
+Datos del desglose por tipo de pago: `exploracion/04_resultados.sql`.
 
 Consulta: `sql/preguntas/pregunta_f_variacion_meses.sql` (tabla `preguntas.pregunta_f_variacion_meses`)
 
@@ -278,4 +278,4 @@ join por_mes anterior
 
 ## Verificación
 
-Las 6 respuestas son idénticas a las que daba la versión anterior del pipeline (Python + DuckDB, rama `master`): mismos datos, mismas reglas de calidad, otro motor. Es la prueba de que la migración al stack de clase no cambió los resultados.
+Las cifras de este documento son las que devuelve `make respuestas` después de `make all MES=2025-03` (corrida del 23/11/2026). Los conteos de calidad en los que se apoyan coinciden con los de `exploracion/HALLAZGOS.md`, medidos por separado sobre los datos crudos.
