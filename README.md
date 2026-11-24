@@ -260,6 +260,25 @@ Ejemplo de uso: el tablero de procesos mostró que la exportación tardaba 2,8 m
 
 ## Tiempo de ejecución y pico de RAM
 
+Medimos la corrida completa en dos máquinas distintas.
+
+### Ubuntu con 32 GB de RAM
+
+Medido el 24/11/2026 en una PC con Ubuntu y 32 GB de RAM, con `docker compose build` y después `make all MES=2025-03`, desde cero: sin la imagen construida y sin datos descargados (primera carga de los dos meses). Los números salen del log de Dagster. El pipeline tardó **3 min 49 s** de punta a punta (más 3 min 15 s de construir la imagen la primera vez).
+
+| Etapa | Duración | Pico de RAM del proceso | CPU | Filas |
+| --- | --- | --- | --- | --- |
+| Construir la imagen (solo la primera vez; `pip install` son 144 s) | 3 min 15 s | — | — | — |
+| Ingesta, primera carga 2025-03 (descarga + carga con dlt) | 65,3 s | 736 MB | 46,0 s | 4.145.257 |
+| Ingesta, primera carga 2024-03 | 56,6 s | 734 MB | 39,1 s | 3.582.628 |
+| dbt: staging, calidad, curado, modelo, preguntas y 26 tests (45/45 OK) | 69,4 s | 571 MB (más Postgres, con techo de 1,5 GB) | 8,6 s | — |
+| Exportación a Parquet 2025-03 | 12,7 s | 758 MB | 11,0 s | 4.053.200 |
+| Exportación a Parquet 2024-03 | 11,2 s | 763 MB | 9,4 s | 3.535.924 |
+
+Con memoria de sobra, dbt baja de unos 12 minutos (Mac de 8 GB) a poco más de 1 minuto, lo que coincide con lo visto en la Mac: su tiempo depende sobre todo de cuánta memoria le queda libre a la máquina para Postgres.
+
+### MacBook Air M2 con 8 GB de RAM
+
 Medido el 23/11/2026 en una MacBook Air M2 con 8 GB de RAM, con el pipeline completo orquestado por Dagster (`make all MES=2025-03`) y los datos ya descargados. Los números salen del tablero "Pipeline - procesos" y del log de Dagster. La corrida completa tardó **15 min 26 s** de punta a punta.
 
 | Etapa | Duración | Pico de RAM del proceso | CPU |
