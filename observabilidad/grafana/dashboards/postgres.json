@@ -359,6 +359,39 @@
           "refId": "C"
         }
       ]
+    },
+    {
+      "id": 11,
+      "type": "logs",
+      "title": "Logs de Postgres",
+      "description": "Consultas de más de 1 s, conexiones y checkpoints (configurado en el docker-compose).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{servicio=\"postgres\"}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none"
+      }
     }
   ],
   "tags": [

@@ -11,7 +11,8 @@
 #   docker compose down               (apaga todo; los datos quedan en los volúmenes)
 #
 # Web:  Dagster http://localhost:3000 · Grafana http://localhost:3001 (admin/admin)
-#       Prometheus http://localhost:9090 · Pushgateway http://localhost:9091 · Postgres localhost:5432
+#       Prometheus http://localhost:9090 · Pushgateway http://localhost:9091 · Alloy http://localhost:12345
+#       Postgres localhost:5432
 #
 # Todas las variables tienen un valor por defecto, así que no hace falta un .env
 # para correrlo. Para cambiarlas, copiar .env.example a .env y editarlo.
@@ -147,6 +148,33 @@ services:
     depends_on:
       - prometheus
 
+  # Loki: guarda los logs de todos los contenedores; se buscan desde Grafana (datasource Loki).
+  loki:
+    image: grafana/loki:3.7.4
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observabilidad/loki.yaml:/etc/loki/loki.yaml:ro
+      - lokidata:/loki
+    networks:
+      - pipeline_net
+    mem_limit: 512m
+
+  # Alloy: lee los logs de los contenedores de este proyecto (por el socket de Docker)
+  # y se los manda a Loki, con la etiqueta "servicio".
+  alloy:
+    image: grafana/alloy:v1.21.0
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./observabilidad/alloy.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "12345:12345"                   # http://localhost:12345 muestra el estado de Alloy
+    networks:
+      - pipeline_net
+    mem_limit: 256m
+    depends_on:
+      - loki
+
   # ---------- Pipeline ----------
   # Todos los servicios de esta sección usan la misma imagen (Dockerfile) y la
   # misma configuración, definida una sola vez en "x-pipeline" al principio del archivo.
@@ -207,12 +235,15 @@ services:
         condition: service_started
       grafana:
         condition: service_started
+      alloy:
+        condition: service_started
 
 volumes:
   pgdata:
   promdata:
   grafanadata:
   dagster_home:
+  lokidata:
 
 networks:
   pipeline_net:

@@ -445,6 +445,39 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "id": 9,
+      "type": "logs",
+      "title": "Logs del pipeline y de Dagster",
+      "description": "Logs de los contenedores del pipeline, juntados por Alloy y guardados en Loki.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{servicio=~\"pipeline|dagster-daemon|dagster-webserver|preparar\"}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none"
+      }
     }
   ],
   "editable": true,
