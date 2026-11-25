@@ -139,6 +139,10 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
+      # Para el origen de datos Postgres (tablero "Preguntas de negocio")
+      POSTGRES_USER: ${POSTGRES_USER:-taxi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxi}
+      POSTGRES_DB: ${POSTGRES_DB:-taxi}
     volumes:
       - ./observabilidad/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observabilidad/grafana/dashboards:/var/lib/grafana/dashboards:ro

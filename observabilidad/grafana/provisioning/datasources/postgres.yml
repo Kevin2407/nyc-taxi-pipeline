@@ -1,0 +1,18 @@
+# Postgres como origen de datos de Grafana: lo usa el tablero "Preguntas de negocio",
+# que lee las tablas del esquema preguntas (y el modelo) que arma dbt.
+# Las credenciales vienen de las variables de entorno del servicio grafana (docker-compose).
+apiVersion: 1
+datasources:
+  - name: Postgres taxi
+    uid: postgres-taxi
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: ${POSTGRES_USER}
+    jsonData:
+      database: ${POSTGRES_DB}
+      sslmode: disable
+      postgresVersion: 1700
+      maxOpenConns: 5
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
