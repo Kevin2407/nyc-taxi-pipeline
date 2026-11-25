@@ -33,6 +33,7 @@ Cada decisión de diseño del pipeline, con su porqué. Las mediciones que respa
 | Postgres con techo de 1,5 GB (`mem_limit`), `shared_buffers=384MB` y `work_mem=32MB`; los contenedores de Python, 2 GB | La máquina de referencia tiene 8 GB que comparte con el resto del stack |
 | Postgres manda al log las consultas de más de 1 s, las conexiones y los checkpoints | Es lo que se mira en los logs para entender qué pasa en la base durante la carga y la transformación |
 | Polars limitado a 2 hilos (`POLARS_MAX_THREADS=2`) | En la Mac (8 núcleos) Polars abría un hilo por núcleo: la exportación llegaba a 1,2 GB de pico y 258 s de CPU, y competía con Postgres. Con 2 hilos bajó a 711 a 721 MB y 52 a 143 s de CPU por mes |
+| Tablero "Preguntas de negocio" en Grafana, con Postgres como origen de datos; los meses salen de las propias tablas de preguntas | Muestra las respuestas comparando los dos meses en gráficos, sin un paso extra en el pipeline: lee lo que dbt ya dejó en el esquema `preguntas` |
 | Grafana en el puerto 3001 | El 3000 queda para la web de Dagster |
 
 ## Parte 1: ingesta

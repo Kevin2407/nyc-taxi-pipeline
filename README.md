@@ -37,7 +37,7 @@ Mientras la plataforma está prendida:
 | Servicio | Dirección |
 | --- | --- |
 | Dagster (grafo, corridas, logs, sensor) | http://localhost:3000 |
-| Grafana (tableros "Postgres - base taxi" y "Pipeline - procesos"; usuario y contraseña `admin`) | http://localhost:3001 |
+| Grafana (tableros "Postgres - base taxi", "Pipeline - procesos" y "Preguntas de negocio - comparación de meses"; usuario y contraseña `admin`) | http://localhost:3001 |
 | Prometheus · Pushgateway · Alloy | http://localhost:9090 · http://localhost:9091 · http://localhost:12345 |
 | PostgreSQL (por ejemplo, desde DBeaver; base, usuario y contraseña `taxi`) | `localhost:5432` |
 
@@ -244,6 +244,7 @@ Además, cada corrida del pipeline ejecuta los 26 tests de datos de dbt (claves,
 
 - **Tablero "Postgres - base taxi":** conexiones, filas leídas y escritas por segundo, bloques desde memoria o disco, archivos temporales, transacciones y tamaño de la base (postgres-exporter). Al pie, los logs de Postgres: consultas de más de 1 segundo y checkpoints.
 - **Tablero "Pipeline - procesos":** por etapa y mes, si terminó bien, cuánto tardó, pico de RAM, CPU y filas; los modelos de dbt más lentos; la duración de cada etapa a lo largo de las corridas. Lo publica `src/metricas.py` (psutil + Pushgateway). Al pie, los logs del pipeline y de Dagster.
+- **Tablero "Preguntas de negocio - comparación de meses":** las 6 preguntas de la consigna, mes asignado contra el mismo mes del año anterior, leídas directamente de las tablas del esquema `preguntas` (origen de datos Postgres en Grafana). Se actualiza solo al terminar cada corrida.
 - **Dagster:** cada corrida con sus pasos, duración, logs y el resultado de cada test de dbt.
 
 Ejemplo de uso: el tablero de procesos mostró que la exportación tardaba 2,8 minutos en la Mac contra 23 segundos en Linux; la causa era escribir el CSV temporal en la carpeta compartida con la máquina. Lo movimos al disco del contenedor y la siguiente corrida bajó a 1,8 minutos.
